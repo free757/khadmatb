@@ -962,6 +962,8 @@ async function setLoggedInUI(place, skipRefresh = false) {
   if (loginBtn) loginBtn.style.display = 'none'; if (logoutBtn) logoutBtn.style.display = 'inline-block'; if (loggedInUser) { loggedInUser.style.display = 'inline-block'; loggedInUser.textContent = (place && place.name) ? place.name : 'صاحب المحل'; }
   const loginModal = document.getElementById('loginModal'); if (loginModal) loginModal.style.display = 'none';
   setLoggedPlace(place);
+  // persist signature for change detection
+  try { window.lastPlaceSignature = computePlaceStateSignature(place); } catch {}
   await loadLookupsAndPopulate().catch(()=>{});
   await tryPrefillPlaceForm(place);
   const tabAds = document.getElementById('tab-ads'); if (tabAds) tabAds.style.display = 'block';
@@ -2270,16 +2272,26 @@ async function forceRefreshPlaceData(showLoading = true) {
   try {
     const fetched = await fetchPlace(logged.id);
     if (fetched) {
-      // استخدام skipRefresh=true لمنع الحلقة اللانهائية
-      await setLoggedInUI(fetched, true);
-      consecutiveFailures = 0; // إعادة تعيين عداد الأخطاء عند النجاح
-      lastSuccessfulRefresh = Date.now();
-      
-      // ضمان أن الباقة المختارة تبقى معطلة بعد التحديث
-      ensurePackageSelectDisabled();
-      
-      if (showLoading) {
-        showSuccess('تم تحديث البيانات من الخادم');
+      // Change detection: only update UI if something changed
+      const newSig = computePlaceStateSignature(fetched);
+      const oldSig = window.lastPlaceSignature || '';
+      if (newSig === oldSig) {
+        // No changes: skip heavy UI update
+        consecutiveFailures = 0;
+        lastSuccessfulRefresh = Date.now();
+      } else {
+        // Update UI and persist new signature
+        await setLoggedInUI(fetched, true);
+        window.lastPlaceSignature = newSig;
+        consecutiveFailures = 0; // إعادة تعيين عداد الأخطاء عند النجاح
+        lastSuccessfulRefresh = Date.now();
+        
+        // ضمان أن الباقة المختارة تبقى معطلة بعد التحديث
+        ensurePackageSelectDisabled();
+        
+        if (showLoading) {
+          showSuccess('تم تحديث البيانات من الخادم');
+        }
       }
     } else {
       consecutiveFailures++;
@@ -2799,5 +2811,22 @@ function setPackagesInteractionEnabled(enabled) {
     grid.style.pointerEvents = 'none';
     grid.style.opacity = '0.7';
   }
+}
+
+// Helper: build a light signature for place package state to detect changes
+function computePlaceStateSignature(place) {
+  try {
+    const raw = place && place.raw ? place.raw : {};
+    const sig = {
+      id: place && place.id ? String(place.id) : '',
+      pkg: String(raw['الباقة'] || ''),
+      status: String(raw['حالة الباقة'] || ''),
+      trial: String(raw['حالة الباقة التجريبية'] || ''),
+      start: String(raw['تاريخ بداية الاشتراك'] || ''),
+      end: String(raw['تاريخ نهاية الاشتراك'] || ''),
+      // extend here if other UI-affecting fields are relevant
+    };
+    return JSON.stringify(sig);
+  } catch { return ''; }
 }
 
