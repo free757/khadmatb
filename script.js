@@ -2670,7 +2670,7 @@ function setupWhatsappAutoFill() {
       if (s.startsWith('00')) s = s.slice(2);
       // إذا لا يوجد طول كافٍ، لا تنشئ رابطاً
       if (s.length < 8) return '';
-      return `https://wa.me/${s}`;
+      return `https://wa.me/+20${s}`;
     };
 
     const maybeFill = () => {
