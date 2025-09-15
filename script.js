@@ -45,6 +45,12 @@ function initTheme() {
   } catch (e) { applyTheme('light'); }
 }
 
+// ========== Safe shims for optional setup functions ==========
+try { if (typeof setupTabs !== 'function') { window.setupTabs = function(){}; } } catch(e) { try { window.setupTabs = function(){}; } catch(_){} }
+try { if (typeof setupForms !== 'function') { window.setupForms = function(){}; } } catch(e) { try { window.setupForms = function(){}; } catch(_){} }
+try { if (typeof enhanceWorkingHoursInput !== 'function') { window.enhanceWorkingHoursInput = function(){}; } } catch(e) { try { window.enhanceWorkingHoursInput = function(){}; } catch(_){} }
+try { if (typeof setupWhatsappAutoFill !== 'function') { window.setupWhatsappAutoFill = function(){}; } } catch(e) { try { window.setupWhatsappAutoFill = function(){}; } catch(_){} }
+
 /* ========== API helpers ========== */
 async function apiFetch(url, opts = {}, retries = 3, delay = 1000) {
   const mini = document.getElementById('miniLoader');
