@@ -162,15 +162,15 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeApp() {
   try {
     setupAuthUI();
-    setupTabs();
-    setupForms();
+    if (typeof setupTabs === 'function') setupTabs();
+    if (typeof setupForms === 'function') setupForms();
     loadLookupsAndPopulate();
     loadPlacesForAds();
     restoreThemeFromStorage();
     // إضافة تحسينات إدخال ساعات العمل
-    enhanceWorkingHoursInput();
+    if (typeof enhanceWorkingHoursInput === 'function') enhanceWorkingHoursInput();
     // تهيئة تعبئة رابط واتساب تلقائياً من رقم التواصل
-    setupWhatsappAutoFill();
+    if (typeof setupWhatsappAutoFill === 'function') setupWhatsappAutoFill();
   } catch (e) { console.error('initializeApp error', e); }
 }
 
