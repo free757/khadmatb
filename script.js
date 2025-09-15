@@ -148,6 +148,8 @@ function initializeApp() {
     restoreThemeFromStorage();
     // إضافة تحسينات إدخال ساعات العمل
     enhanceWorkingHoursInput();
+    // تهيئة تعبئة رابط واتساب تلقائياً من رقم التواصل
+    setupWhatsappAutoFill();
   } catch (e) { console.error('initializeApp error', e); }
 }
 
@@ -495,6 +497,23 @@ async function handlePlaceSubmit(ev) {
   try {
     const form = ev.target;
     const formData = new FormData(form);
+
+    // قبل الإرسال: إن لم يوجد رابط واتساب وحقل الهاتف موجود، أنشئه تلقائياً
+    try {
+      const phoneVal = formData.get('phone');
+      const waVal = formData.get('whatsappLink');
+      if ((!waVal || String(waVal).trim() === '') && phoneVal) {
+        let s = String(phoneVal).trim();
+        s = s.replace(/\+/g, '').replace(/\D/g, '');
+        if (s.startsWith('00')) s = s.slice(2);
+        if (s.length >= 8) {
+          formData.set('whatsappLink', `https://wa.me/${s}`);
+          const waInput = document.querySelector('input[name="whatsappLink"]');
+          if (waInput) waInput.value = formData.get('whatsappLink');
+        }
+      }
+    } catch {}
+
     const placeData = {
       placeName: formData.get('placeName'),
       activityType: formData.get('activityType'),
@@ -1013,6 +1032,9 @@ async function tryPrefillPlaceForm(place) {
 
     // إعادة تهيئة أدوات ساعات العمل بعد الملء
     enhanceWorkingHoursInput();
+
+    // تفعيل التوليد التلقائي لرابط واتساب بعد الملء
+    setupWhatsappAutoFill();
   } catch (e) { console.warn('tryPrefillPlaceForm failed', e); }
 }
 
@@ -2628,5 +2650,57 @@ function enhanceWorkingHoursInput() {
       input._whEnhanced = true;
     }
   } catch (e) { console.warn('enhanceWorkingHoursInput error', e); }
+}
+
+/* Auto fill WhatsApp link from phone */
+function setupWhatsappAutoFill() {
+  try {
+    const phoneInput = document.querySelector('input[name="phone"]');
+    const waInput = document.querySelector('input[name="whatsappLink"]');
+    if (!phoneInput || !waInput) return;
+
+    const buildWaLink = (raw) => {
+      if (!raw) return '';
+      let s = String(raw).trim();
+      // إن وُجد + حوّلها لأرقام فقط بدون +
+      s = s.replace(/\+/g, '');
+      // أزل أي محارف غير الأرقام
+      s = s.replace(/\D/g, '');
+      // إذا بدأ بـ 00 حولها إلى إزالة الـ 00 (واستعمال الباقي)
+      if (s.startsWith('00')) s = s.slice(2);
+      // إذا لا يوجد طول كافٍ، لا تنشئ رابطاً
+      if (s.length < 8) return '';
+      return `https://wa.me/${s}`;
+    };
+
+    const maybeFill = () => {
+      const phoneVal = phoneInput.value || '';
+      const currentWa = waInput.value || '';
+      const auto = buildWaLink(phoneVal);
+      // لا نكتب فوق إدخال المستخدم اليدوي (إن قام بتغييره)
+      if (!currentWa || waInput._autoFilled) {
+        if (auto) {
+          waInput.value = auto;
+          waInput._autoFilled = true;
+        }
+      }
+    };
+
+    // املأ مبدئياً إن أمكن
+    maybeFill();
+
+    // حدث عند تغيير الهاتف
+    phoneInput.removeEventListener('_wa_input_change', phoneInput._waHandler || (()=>{}));
+    const handler = () => maybeFill();
+    phoneInput.addEventListener('input', handler);
+    phoneInput.addEventListener('blur', handler);
+    phoneInput._waHandler = handler;
+
+    // إذا المستخدم غيّر رابط الواتساب يدوياً، توقف عن الكتابة عليه
+    waInput.removeEventListener('_wa_user_edit', waInput._waUserHandler || (()=>{}));
+    const userHandler = () => { waInput._autoFilled = false; };
+    waInput.addEventListener('input', userHandler);
+    waInput._waUserHandler = userHandler;
+  } catch (e) { console.warn('setupWhatsappAutoFill error', e); }
 }
 
