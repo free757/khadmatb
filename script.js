@@ -139,12 +139,16 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeApp() {
-  const today = new Date().toISOString().split('T')[0];
-  const startInput = document.querySelector('input[name="startDate"]');
-  const endInput = document.querySelector('input[name="endDate"]');
-  if (startInput) startInput.value = today;
-  const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
-  if (endInput) endInput.value = nextWeek.toISOString().split('T')[0];
+  try {
+    setupAuthUI();
+    setupTabs();
+    setupForms();
+    loadLookupsAndPopulate();
+    loadPlacesForAds();
+    restoreThemeFromStorage();
+    // إضافة تحسينات إدخال ساعات العمل
+    enhanceWorkingHoursInput();
+  } catch (e) { console.error('initializeApp error', e); }
 }
 
 /* ========== Event listeners ========== */
@@ -1006,6 +1010,9 @@ async function tryPrefillPlaceForm(place) {
     
     // ضمان أن الباقة المختارة تبقى معطلة
     ensurePackageSelectDisabled();
+
+    // إعادة تهيئة أدوات ساعات العمل بعد الملء
+    enhanceWorkingHoursInput();
   } catch (e) { console.warn('tryPrefillPlaceForm failed', e); }
 }
 
@@ -2582,5 +2589,44 @@ function updateInlinePackageInfoCard(place) {
   } catch (e) {
     console.warn('updateInlinePackageInfoCard error', e);
   }
+}
+
+// أدوات مساعدة لحقل ساعات العمل: جعله اختياري وسريع التعبئة
+function enhanceWorkingHoursInput() {
+  try {
+    const input = document.querySelector('input[name="workingHours"]');
+    if (!input) return;
+
+    // لا تكرر الأدوات إذا كانت مضافة
+    if (input._whEnhanced) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.style.marginTop = '6px';
+    wrapper.style.display = 'flex';
+    wrapper.style.gap = '6px';
+    wrapper.style.flexWrap = 'wrap';
+
+    const makeBtn = (label) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.className = 'btn btn-small'; b.style.padding = '4px 8px'; b.style.borderRadius='6px'; b.style.border='1px solid #ddd'; b.style.background='#f9fafb'; b.style.cursor='pointer'; return b; };
+
+    const btn24 = makeBtn('مفتوح 24 ساعة');
+    btn24.addEventListener('click', () => { input.value = 'مفتوح 24 ساعة'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+
+    const btnDefault = makeBtn('ساعات افتراضية');
+    btnDefault.title = '9:00 ص - 11:00 م';
+    btnDefault.addEventListener('click', () => { input.value = '9:00 ص - 11:00 م'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+
+    const btnClear = makeBtn('بدون ساعات');
+    btnClear.addEventListener('click', () => { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); });
+
+    wrapper.appendChild(btn24);
+    wrapper.appendChild(btnDefault);
+    wrapper.appendChild(btnClear);
+
+    // ضع الأدوات بعد الحقل مباشرة
+    if (input.parentElement) {
+      input.parentElement.appendChild(wrapper);
+      input._whEnhanced = true;
+    }
+  } catch (e) { console.warn('enhanceWorkingHoursInput error', e); }
 }
 
