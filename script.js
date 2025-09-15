@@ -31,18 +31,31 @@ function applyTheme(theme) {
   try { localStorage.setItem(THEME_KEY, theme || 'light'); } catch(e){}
 }
 function toggleTheme() {
-  const cur = (localStorage.getItem(THEME_KEY) === 'dark') ? 'dark' : 'light';
-  applyTheme(cur === 'dark' ? 'light' : 'dark');
+  try {
+    const current = localStorage.getItem(THEME_KEY);
+    const newTheme = (current === 'dark') ? 'light' : 'dark';
+    applyTheme(newTheme);
+    console.log(`Theme changed to: ${newTheme}`);
+  } catch (e) {
+    console.error('Error toggling theme:', e);
+    // fallback to light theme
+    applyTheme('light');
+  }
 }
 function initTheme() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved) applyTheme(saved);
-    else {
+    if (saved) {
+      applyTheme(saved);
+    } else {
       const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       applyTheme(prefersDark ? 'dark' : 'light');
     }
-  } catch (e) { applyTheme('light'); }
+    console.log('Theme initialized:', saved || 'auto-detected');
+  } catch (e) { 
+    console.error('Theme initialization error:', e);
+    applyTheme('light'); 
+  }
 }
 
 // ========== Safe shims for optional setup functions ==========
@@ -50,6 +63,7 @@ try { if (typeof setupTabs !== 'function') { window.setupTabs = function(){}; } 
 try { if (typeof setupForms !== 'function') { window.setupForms = function(){}; } } catch(e) { try { window.setupForms = function(){}; } catch(_){} }
 try { if (typeof enhanceWorkingHoursInput !== 'function') { window.enhanceWorkingHoursInput = function(){}; } } catch(e) { try { window.enhanceWorkingHoursInput = function(){}; } catch(_){} }
 try { if (typeof setupWhatsappAutoFill !== 'function') { window.setupWhatsappAutoFill = function(){}; } } catch(e) { try { window.setupWhatsappAutoFill = function(){}; } catch(_){} }
+try { if (typeof restoreThemeFromStorage !== 'function') { window.restoreThemeFromStorage = function(){}; } } catch(e) { try { window.restoreThemeFromStorage = function(){}; } catch(_){} }
 
 /* ========== API helpers ========== */
 async function apiFetch(url, opts = {}, retries = 3, delay = 1000) {
@@ -167,12 +181,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initializeApp() {
   try {
+    // تهيئة المظهر أولاً
+    initTheme();
+    
     setupAuthUI();
     if (typeof setupTabs === 'function') setupTabs();
     if (typeof setupForms === 'function') setupForms();
     loadLookupsAndPopulate();
     loadPlacesForAds();
-    restoreThemeFromStorage();
+    if (typeof restoreThemeFromStorage === 'function') restoreThemeFromStorage();
     // إضافة تحسينات إدخال ساعات العمل
     if (typeof enhanceWorkingHoursInput === 'function') enhanceWorkingHoursInput();
     // تهيئة تعبئة رابط واتساب تلقائياً من رقم التواصل
@@ -291,7 +308,7 @@ async function loadLookupsAndPopulate() {
         if (list.length === 0) {
           const emptyMsg = document.createElement('p');
           emptyMsg.textContent = 'لا توجد باقات حالياً.';
-          emptyMsg.style.color = 'var(--text-secondary)';
+          emptyMsg.style.cssText = 'color: var(--text-secondary); text-align: center; padding: 2rem; font-size: 1.1rem;';
           pkgGrid.appendChild(emptyMsg);
         }
         list.forEach(p => {
@@ -859,56 +876,163 @@ async function loadPlacesForAds() {
 function updateAdsTabVisibilitySafely() { if (typeof updateAdsTabVisibility === 'function') updateAdsTabVisibility(); }
 
 async function loadAdsForPlace(placeId) {
-  if (!placeId) return;
+  if (!placeId) {
+    console.warn('loadAdsForPlace: No placeId provided');
+    return;
+  }
+  
   try {
+    console.log('Loading ads for place:', placeId);
     const resp = await apiFetch(`${API_URL}?action=ads&placeId=${encodeURIComponent(placeId)}`);
-    if (!resp.ok) { console.warn('loadAdsForPlace failed', resp); return; }
+    
+    if (!resp.ok) { 
+      console.warn('loadAdsForPlace failed', resp); 
+      return; 
+    }
+    
     const json = resp.data;
-    const ads = (json && json.success && json.data && json.data.ads) ? json.data.ads : (json && json.ads) ? json.ads : (json && json.data && json.data) ? json.data : [];
+    const ads = (json && json.success && json.data && json.data.ads) ? json.data.ads : 
+                (json && json.ads) ? json.ads : 
+                (json && json.data && json.data) ? json.data : [];
+
+    console.log('Loaded ads:', Array.isArray(ads) ? ads.length : 'not an array', ads);
 
     // Change detection for ads list
     const newSig = computeAdsSignature(ads);
     const oldSig = window.lastAdsSignature || '';
-    if (newSig === oldSig) return;
+    if (newSig === oldSig) {
+      console.log('Ads signature unchanged, skipping render');
+      return;
+    }
     window.lastAdsSignature = newSig;
 
     renderAdsList(Array.isArray(ads) ? ads : []);
-  } catch (err) { console.error('loadAdsForPlace error', err); }
+  } catch (err) { 
+    console.error('loadAdsForPlace error', err); 
+  }
 }
 
 function renderAdsList(ads) {
-  let c = document.getElementById('adsListContainer');
-  if (!c) return;
-  c.innerHTML = '';
-  if (!ads || ads.length === 0) { c.innerHTML = '<p>لا توجد إعلانات حالياً لهذا المحل.</p>'; return; }
-  ads.forEach(ad => {
-    const card = document.createElement('div'); card.className = 'ad-card';
-    const h = document.createElement('h4'); h.textContent = ad.title || '(بدون عنوان)';
-    const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = `${ad.startDate || ''} — ${ad.endDate || ''} · الحالة: ${ad.status || ''}`;
-    const p = document.createElement('p'); p.textContent = ad.description || '';
-    card.appendChild(h); card.appendChild(meta); card.appendChild(p);
+  const container = document.getElementById('adsListContainer');
+  if (!container) return;
+  
+  // مسح المحتوى السابق
+  container.innerHTML = '';
+  
+  // التحقق من وجود إعلانات
+  if (!ads || !Array.isArray(ads) || ads.length === 0) { 
+    container.innerHTML = '<p>لا توجد إعلانات حالياً لهذا المحل.</p>'; 
+    return; 
+  }
+  
+  // إضافة عداد الإعلانات
+  const countHeader = document.createElement('div');
+  countHeader.style.cssText = 'margin-bottom: 1rem; padding: 0.5rem; background: var(--card-background); border: 1px solid var(--border-color); border-radius: 6px; font-weight: 600; color: var(--text-primary);';
+  countHeader.textContent = `عدد الإعلانات: ${ads.length}`;
+  container.appendChild(countHeader);
+  
+  // عرض كل إعلان
+  ads.forEach((ad, index) => {
+    const card = document.createElement('div'); 
+    card.className = 'ad-card';
+    card.style.cssText = 'margin-bottom: 1rem;';
+    
+    // عنوان الإعلان
+    const title = document.createElement('h4'); 
+    title.textContent = ad.title || ad.adTitle || '(بدون عنوان)';
+    title.style.cssText = 'margin-bottom: 0.5rem; color: var(--primary-color);';
+    
+    // معلومات الإعلان
+    const meta = document.createElement('div'); 
+    meta.className = 'meta';
+    const startDate = ad.startDate || ad.start_date || '';
+    const endDate = ad.endDate || ad.end_date || '';
+    const status = ad.status || ad.adStatus || 'غير محدد';
+    meta.textContent = `${startDate} — ${endDate} · الحالة: ${status}`;
+    
+    // وصف الإعلان
+    const description = document.createElement('p'); 
+    description.textContent = ad.description || ad.adDescription || '';
+    description.style.cssText = 'margin: 0.5rem 0;';
+    
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(description);
 
+    // عرض الصور
     if (ad.images && ad.images.length > 0) {
-      const imgs = document.createElement('div'); imgs.className = 'ad-images';
-      const imagesArr = Array.isArray(ad.images) ? ad.images : (ad.images && typeof ad.images === 'string' ? JSON.parse(ad.images) : []);
-      imagesArr.forEach(im => {
+      const imagesContainer = document.createElement('div'); 
+      imagesContainer.className = 'ad-images';
+      imagesContainer.style.cssText = 'margin: 1rem 0;';
+      
+      let imagesArray = [];
+      try {
+        if (Array.isArray(ad.images)) {
+          imagesArray = ad.images;
+        } else if (typeof ad.images === 'string') {
+          imagesArray = JSON.parse(ad.images);
+        }
+      } catch (e) {
+        console.warn('Error parsing ad images:', e);
+        imagesArray = [];
+      }
+      
+      imagesArray.forEach(img => {
         let url = '', name = '';
-        if (im && typeof im === 'object') { url = im.url || ''; name = im.name || ''; }
-        else if (typeof im === 'string') { name = im; url = ''; }
-        if (!url && name && recentUploads[name]) url = recentUploads[name].url;
-        if (url) { const img = document.createElement('img'); img.src = url; img.alt = name || ''; imgs.appendChild(img); }
-        else if (name) { const wrap = document.createElement('div'); wrap.className = 'img-placeholder-file'; wrap.textContent = name; imgs.appendChild(wrap); }
-        else { const wrap = document.createElement('div'); wrap.className = 'img-placeholder-file'; wrap.textContent = 'لا توجد صورة'; imgs.appendChild(wrap); }
+        
+        if (img && typeof img === 'object') { 
+          url = img.url || img.src || ''; 
+          name = img.name || img.filename || ''; 
+        } else if (typeof img === 'string') { 
+          name = img; 
+          url = ''; 
+        }
+        
+        // البحث في الرفعات الحديثة
+        if (!url && name && recentUploads[name]) {
+          url = recentUploads[name].url;
+        }
+        
+        if (url) { 
+          const imgElement = document.createElement('img'); 
+          imgElement.src = url; 
+          imgElement.alt = name || ''; 
+          imgElement.style.cssText = 'width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color); margin: 2px;';
+          imagesContainer.appendChild(imgElement); 
+        } else if (name) { 
+          const placeholder = document.createElement('div'); 
+          placeholder.className = 'img-placeholder-file'; 
+          placeholder.textContent = name.length > 20 ? name.substring(0, 20) + '...' : name;
+          placeholder.style.cssText = 'width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; text-align: center; background: var(--border-color); border-radius: 6px; margin: 2px;';
+          imagesContainer.appendChild(placeholder); 
+        }
       });
-      card.appendChild(imgs);
+      
+      if (imagesContainer.children.length > 0) {
+        card.appendChild(imagesContainer);
+      }
     }
 
-    const actions = document.createElement('div'); actions.className = 'ad-actions';
-    const editBtn = document.createElement('button'); editBtn.className = 'edit-btn'; editBtn.textContent = 'تعديل'; editBtn.onclick = () => startEditAd(ad);
-    const delBtn = document.createElement('button'); delBtn.className = 'delete-btn'; delBtn.textContent = 'حذف'; delBtn.onclick = () => deleteAdConfirm(ad.id);
-    actions.appendChild(editBtn); actions.appendChild(delBtn);
+    // أزرار الإجراءات
+    const actions = document.createElement('div'); 
+    actions.className = 'ad-actions';
+    actions.style.cssText = 'margin-top: 1rem; display: flex; gap: 0.5rem;';
+    
+    const editBtn = document.createElement('button'); 
+    editBtn.className = 'edit-btn'; 
+    editBtn.textContent = 'تعديل'; 
+    editBtn.onclick = () => startEditAd(ad);
+    
+    const delBtn = document.createElement('button'); 
+    delBtn.className = 'delete-btn'; 
+    delBtn.textContent = 'حذف'; 
+    delBtn.onclick = () => deleteAdConfirm(ad.id || ad.adId);
+    
+    actions.appendChild(editBtn); 
+    actions.appendChild(delBtn);
     card.appendChild(actions);
-    c.appendChild(card);
+    
+    container.appendChild(card);
   });
 }
 
