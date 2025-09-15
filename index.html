@@ -1485,179 +1485,30 @@
             return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
         }
 
-        // دالة تبديل المظهر
+        // دالة تبديل المظهر - سيتم استبدالها من script.js
         function toggleTheme() {
-            const cur = (localStorage.getItem('ban_theme') === 'dark') ? 'dark' : 'light';
-            applyTheme(cur === 'dark' ? 'light' : 'dark');
+            // هذه الدالة ستتم استبدالها من script.js
+            console.log('toggleTheme called from HTML - will be overridden by script.js');
         }
 
-        // دالة تطبيق المظهر
-        function applyTheme(theme) {
-            if (theme === 'dark') {
-                document.body.classList.add('dark');
-                const icon = document.getElementById('themeIcon');
-                const lbl = document.getElementById('themeLabel');
-                if (icon) icon.className = 'fas fa-sun';
-                if (lbl) lbl.textContent = 'الوضع النهاري';
-            } else {
-                document.body.classList.remove('dark');
-                const icon = document.getElementById('themeIcon');
-                const lbl = document.getElementById('themeLabel');
-                if (icon) icon.className = 'fas fa-moon';
-                if (lbl) lbl.textContent = 'الوضع الليلي';
-            }
-            try { localStorage.setItem('ban_theme', theme || 'light'); } catch(e){}
-        }
+        // دوال الباقات ستكون في script.js
 
-        // دالة لتحديث مظهر بطاقات الباقات بناءً على الحالة
-        function updatePackageCardAppearance(packageId, status, isTrialUsed = false) {
-            const card = document.querySelector(`[data-package-id="${packageId}"]`);
-            if (!card) return;
-
-            // إزالة جميع الكلاسات السابقة
-            card.classList.remove('active', 'pending', 'expired');
-            
-            const button = card.querySelector('.choose-pkg');
-            if (!button) return;
-
-            // إزالة جميع كلاسات الأزرار السابقة
-            button.classList.remove('btn-activate', 'btn-active', 'btn-pending', 'btn-expired', 'btn-trial-used');
-
-            const price = Number(button.dataset.price || 0);
-
-            switch (status) {
-                case 'مفعلة':
-                    card.classList.add('active');
-                    button.classList.add('btn-active');
-                    button.textContent = '✓ مُفعّلة حالياً';
-                    button.disabled = true;
-                    button.style.opacity = '0.6';
-                    break;
-
-                case 'قيد الدفع':
-                    card.classList.add('pending');
-                    button.classList.add('btn-pending');
-                    button.textContent = '⏳ قيد التحقق من الدفع';
-                    button.disabled = true;
-                    button.style.opacity = '0.6';
-                    break;
-
-                case 'منتهية':
-                    card.classList.add('expired');
-                    button.classList.add('btn-expired');
-                    button.textContent = '🔄 تجديد الاشتراك';
-                    button.disabled = false;
-                    button.style.opacity = '1';
-                    break;
-
-                default:
-                    // فحص إذا كانت باقة تجريبية مستخدمة سابقاً
-                    if (isTrialUsed && price === 0) {
-                        card.classList.add('expired');
-                        button.classList.add('btn-trial-used');
-                        button.textContent = '❌ تم استخدامها سابقاً';
-                        button.disabled = true;
-                        button.style.opacity = '0.6';
-                    } else {
-                        button.classList.add('btn-activate');
-                        button.textContent = price === 0 ? '🚀 تفعيل تجريبي مجاني' : '💳 اختر هذه الباقة';
-                        button.disabled = false;
-                        button.style.opacity = '1';
-                    }
-                    break;
-            }
-        }
-
-        // دالة لتحديث جميع بطاقات الباقات
-        function refreshAllPackageCards() {
-            const loggedPlace = getLoggedPlace ? getLoggedPlace() : null;
-            if (!loggedPlace) return;
-
-            const currentPackageId = loggedPlace.raw?.['الباقة'] || '';
-            const packageStatus = loggedPlace.raw?.['حالة الباقة'] || '';
-            const isTrialUsed = String(loggedPlace.raw?.['حالة الباقة التجريبية'] || '').toLowerCase() === 'true';
-
-            // تحديث جميع البطاقات
-            document.querySelectorAll('.pkg-card').forEach(card => {
-                const packageId = card.dataset.packageId || '';
-                
-                if (packageId === currentPackageId) {
-                    updatePackageCardAppearance(packageId, packageStatus, isTrialUsed);
-                } else {
-                    updatePackageCardAppearance(packageId, '', isTrialUsed);
-                }
-            });
-        }
-
-        // // استدعاء التحديث عند تحميل الصفحة
-        // document.addEventListener('DOMContentLoaded', () => {
-        //     // انتظار قليل لضمان تحميل script.js
-        //     setTimeout(refreshAllPackageCards, 500);
-        // });
-        ////////////////////////////////////////////////////////////////////////////////////////////////////
-
+        // تهيئة أساسية - باقي الدوال في script.js
         document.addEventListener('DOMContentLoaded', function() {
-            // تهيئة المظهر
+            // تهيئة المظهر الأساسي
             try {
                 const saved = localStorage.getItem('ban_theme');
-                if (saved) applyTheme(saved);
-                else {
-                    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-                    applyTheme(prefersDark ? 'dark' : 'light');
+                if (saved) {
+                    if (saved === 'dark') {
+                        document.body.classList.add('dark');
+                    } else {
+                        document.body.classList.remove('dark');
+                    }
                 }
-            } catch (e) { applyTheme('light'); }
-
-            // انتظار تحميل script.js ثم تشغيل الدوال
-            setTimeout(function() {
-                if (typeof refreshAllPackageCards !== 'undefined') {
-                    refreshAllPackageCards();
-                }
-                if (typeof refreshPackageUIFromDashboard !== 'undefined') {
-                    refreshPackageUIFromDashboard();
-                }
-            }, 1000);
+            } catch (e) { 
+                console.warn('Theme initialization error:', e);
+            }
         });
-
-
-        ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-        ////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-        // دالة للحصول على المكان المسجل
-    function getLoggedPlace() {
-        try {
-            const raw = localStorage.getItem('khedmatak_place');
-            return raw ? JSON.parse(raw) : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    // دالة مساعدة للتحقق من وجود دالة
-    function isFunction(functionToCheck) {
-        return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
-    }
-
-    // دالة لتحديث حالة الزر بناءً على سعر الباقة
-    function updateButtonBasedOnPrice(button, price, isTrialUsed) {
-        if (price === '0' && isTrialUsed) {
-            button.classList.add('btn-trial-used');
-            button.textContent = '❌ تم استخدامها سابقاً';
-            button.disabled = true;
-        } else if (price === '0') {
-            button.classList.add('btn-activate');
-            button.textContent = '🚀 تفعيل تجريبي مجاني';
-            button.disabled = false;
-        } else {
-            button.classList.add('btn-activate');
-            button.textContent = '💳 اختر هذه الباقة';
-            button.disabled = false;
-        }
-    }
-
-        ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 
