@@ -47,35 +47,56 @@ function initTheme() {
 
 /* ========== API helpers ========== */
 async function apiFetch(url, opts = {}, retries = 3, delay = 1000) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  const mini = document.getElementById('miniLoader');
+  let miniShownAt = 0;
+  const showMini = (text) => {
+    if (!mini) return;
+    miniShownAt = Date.now();
+    mini.style.display = 'flex';
+    mini.style.opacity = '1';
+    mini.style.transform = 'translateY(0)';
+    const tx = document.getElementById('miniLoaderText'); if (tx && text) tx.textContent = text;
+  };
+  const hideMini = () => {
+    if (!mini) return;
+    const MIN_VISIBLE = 350;
+    const elapsed = Date.now() - miniShownAt;
+    const wait = Math.max(0, MIN_VISIBLE - elapsed);
+    setTimeout(() => {
+      mini.style.opacity = '0';
+      mini.style.transform = 'translateY(-6px)';
+      setTimeout(() => { mini.style.display = 'none'; }, 180);
+    }, wait);
+  };
+  try { showMini('جارٍ التحميل...'); } catch(e){}
   try {
-    const res = await fetch(url, opts);
-    const text = await res.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch (e) { data = text; }
-    return { ok: res.ok, status: res.status, data, raw: text };
-  } catch (err) {
-      const isLastAttempt = attempt === retries;
-      const isNetworkError = err.message.includes('Failed to fetch') || 
-                            err.message.includes('ERR_NETWORK_CHANGED') ||
-                            err.message.includes('NetworkError');
-      
-      console.warn(`API fetch attempt ${attempt}/${retries} failed:`, err.message);
-      
-      if (isLastAttempt) {
-    return { ok: false, status: 0, error: err.message || String(err) };
-  }
-      
-      // فقط أعد المحاولة للأخطاء الشبكية
-      if (isNetworkError) {
-        const backoffDelay = delay * Math.pow(2, attempt - 1);
-        console.log(`Retrying in ${backoffDelay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, backoffDelay));
-      } else {
-        // للأخطاء الأخرى، لا تعيد المحاولة
-        return { ok: false, status: 0, error: err.message || String(err) };
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(url, opts);
+        const text = await res.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (e) { data = text; }
+        return { ok: res.ok, status: res.status, data, raw: text };
+      } catch (err) {
+        const isLastAttempt = attempt === retries;
+        const isNetworkError = err.message.includes('Failed to fetch') || 
+                              err.message.includes('ERR_NETWORK_CHANGED') ||
+                              err.message.includes('NetworkError');
+        console.warn(`API fetch attempt ${attempt}/${retries} failed:`, err.message);
+        if (isLastAttempt) {
+          return { ok: false, status: 0, error: err.message || String(err) };
+        }
+        if (isNetworkError) {
+          const backoffDelay = delay * Math.pow(2, attempt - 1);
+          console.log(`Retrying in ${backoffDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        } else {
+          return { ok: false, status: 0, error: err.message || String(err) };
+        }
       }
     }
+  } finally {
+    try { hideMini(); } catch(e){}
   }
 }
 async function apiPost(payload, retries = 3) {
