@@ -275,7 +275,8 @@ async function loadLookupsAndPopulate() {
     //========== إنشاء كروت الباقات ==========
     const pkgGrid = document.getElementById('packagesGrid');
     if (pkgGrid) {
-      const shouldRebuild = (newLookupSig !== oldLookupSig) || pkgGrid.children.length === 0;
+      const forceRebuild = !!window.forceRebuildPackages;
+      const shouldRebuild = forceRebuild || (newLookupSig !== oldLookupSig) || pkgGrid.children.length === 0;
       if (shouldRebuild) {
         // clear any skeletons but keep grid locked
         hideLoadingSkeleton();
@@ -286,7 +287,14 @@ async function loadLookupsAndPopulate() {
         const packageStatus = logged?.raw?.['حالة الباقة'] || '';
         const isTrialUsed = String(logged?.raw?.['حالة الباقة التجريبية'] || '').toLowerCase() === 'true';
 
-        (data.packages || []).forEach(p => {
+        const list = Array.isArray(data.packages) ? data.packages : [];
+        if (list.length === 0) {
+          const emptyMsg = document.createElement('p');
+          emptyMsg.textContent = 'لا توجد باقات حالياً.';
+          emptyMsg.style.color = 'var(--text-secondary)';
+          pkgGrid.appendChild(emptyMsg);
+        }
+        list.forEach(p => {
           const div = document.createElement('div'); 
           div.className = 'pkg-card';
           div.setAttribute('data-package-id', p.id);
@@ -329,6 +337,7 @@ async function loadLookupsAndPopulate() {
           div.appendChild(btn);
           pkgGrid.appendChild(div);
         });
+        if (forceRebuild) { try { window.forceRebuildPackages = false; } catch(e){} }
       } else {
         // لا حاجة لإعادة البناء: حدّث المظهر ومكّن التفاعل
         hideLoadingSkeleton();
@@ -365,6 +374,8 @@ async function loadLookupsAndPopulate() {
     console.error('loadLookupsAndPopulate error', err);
   } finally {
     hideLoadingSkeleton();
+    // تأكيد تمكين تفاعل الباقات حتى لو لم تُبنَ لسبب ما
+    try { setPackagesInteractionEnabled(true); } catch(e){}
   }
 }
 
@@ -674,9 +685,10 @@ async function handlePlaceSubmit(ev) {
     const preview = document.getElementById('placeImagePreview'); if (preview) preview.innerHTML = '';
     uploadedImages = [];
     // إعادة تحميل الباقات بعد التحديث لضمان ظهورها حتى بعد رفع الصورة
+    try { window.forceRebuildPackages = true; } catch(e){}
     await loadLookupsAndPopulate();
     // في حال لم تُبنَ الكروت لأي سبب، أعد المحاولة سريعاً
-    setTimeout(() => { try { loadLookupsAndPopulate(); } catch(e){} }, 500);
+    setTimeout(() => { try { window.forceRebuildPackages = true; loadLookupsAndPopulate(); } catch(e){} }, 500);
     loadPlacesForAds();
     const newLogged = getLoggedPlace(); if (newLogged && newLogged.id) { if (typeof checkAdQuotaAndToggle === 'function') checkAdQuotaAndToggle(newLogged.id); if (typeof loadAdsForPlace === 'function') loadAdsForPlace(newLogged.id); }
   } catch (err) {
