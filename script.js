@@ -269,7 +269,8 @@ async function loadLookupsAndPopulate() {
     //========== إنشاء كروت الباقات ==========
     const pkgGrid = document.getElementById('packagesGrid');
     if (pkgGrid) {
-      if (newLookupSig !== oldLookupSig) {
+      const shouldRebuild = (newLookupSig !== oldLookupSig) || pkgGrid.children.length === 0;
+      if (shouldRebuild) {
         // clear any skeletons but keep grid locked
         hideLoadingSkeleton();
         pkgGrid.innerHTML = '';
@@ -322,6 +323,11 @@ async function loadLookupsAndPopulate() {
           div.appendChild(btn);
           pkgGrid.appendChild(div);
         });
+      } else {
+        // لا حاجة لإعادة البناء: حدّث المظهر ومكّن التفاعل
+        hideLoadingSkeleton();
+        if (typeof refreshAllPackageCards === 'function') refreshAllPackageCards();
+        setPackagesInteractionEnabled(true);
       }
     }
 
@@ -661,7 +667,10 @@ async function handlePlaceSubmit(ev) {
     showSuccess('تم حفظ المكان بنجاح!');
     const preview = document.getElementById('placeImagePreview'); if (preview) preview.innerHTML = '';
     uploadedImages = [];
+    // إعادة تحميل الباقات بعد التحديث لضمان ظهورها حتى بعد رفع الصورة
     await loadLookupsAndPopulate();
+    // في حال لم تُبنَ الكروت لأي سبب، أعد المحاولة سريعاً
+    setTimeout(() => { try { loadLookupsAndPopulate(); } catch(e){} }, 500);
     loadPlacesForAds();
     const newLogged = getLoggedPlace(); if (newLogged && newLogged.id) { if (typeof checkAdQuotaAndToggle === 'function') checkAdQuotaAndToggle(newLogged.id); if (typeof loadAdsForPlace === 'function') loadAdsForPlace(newLogged.id); }
   } catch (err) {
