@@ -48,13 +48,13 @@ function initTheme() {
 /* ========== API helpers ========== */
 async function apiFetch(url, opts = {}, retries = 3, delay = 1000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, opts);
-      const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch (e) { data = text; }
-      return { ok: res.ok, status: res.status, data, raw: text };
-    } catch (err) {
+  try {
+    const res = await fetch(url, opts);
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { data = text; }
+    return { ok: res.ok, status: res.status, data, raw: text };
+  } catch (err) {
       const isLastAttempt = attempt === retries;
       const isNetworkError = err.message.includes('Failed to fetch') || 
                             err.message.includes('ERR_NETWORK_CHANGED') ||
@@ -63,8 +63,8 @@ async function apiFetch(url, opts = {}, retries = 3, delay = 1000) {
       console.warn(`API fetch attempt ${attempt}/${retries} failed:`, err.message);
       
       if (isLastAttempt) {
-        return { ok: false, status: 0, error: err.message || String(err) };
-      }
+    return { ok: false, status: 0, error: err.message || String(err) };
+  }
       
       // فقط أعد المحاولة للأخطاء الشبكية
       if (isNetworkError) {
@@ -182,11 +182,16 @@ async function loadLookupsAndPopulate() {
     const data = (json && json.success && json.data) ? json.data : json;
     if (!data) return;
 
+    // Change detection for lookups
+    const newLookupSig = computeLookupsSignature(data);
+    const oldLookupSig = window.lastLookupsSignature || '';
+    window.lastLookupsSignature = newLookupSig;
+
     window.lastLookups = data; // حفظ آخر القوائم
 
-    //========== تعبئة القوائم (نشاط / مدينة / منطقة / مواقع) ==========
+    // If lookups did not change, still ensure dependent UI is consistent but avoid heavy rebuild where possible
     const actSelect = document.querySelector('select[name="activityType"]');
-    if (actSelect) {
+    if (actSelect && newLookupSig !== oldLookupSig) {
       actSelect.disabled = false;
       actSelect.innerHTML = '<option value="">اختر نوع النشاط</option>';
       (data.activities || []).forEach(a => {
@@ -195,7 +200,7 @@ async function loadLookupsAndPopulate() {
     }
 
     const citySelect = document.querySelector('select[name="city"]');
-    if (citySelect) {
+    if (citySelect && newLookupSig !== oldLookupSig) {
       citySelect.disabled = false;
       citySelect.innerHTML = '<option value="">اختر المدينة</option>';
       (data.cities || []).forEach(c => {
@@ -212,17 +217,18 @@ async function loadLookupsAndPopulate() {
     window.cityAreaMap = cityAreaMap;
 
     const siteSelects = document.querySelectorAll('select[name="location"]');
-    siteSelects.forEach(s => {
-      s.disabled = false;
-      s.innerHTML = '<option value="">اختر الموقع</option>';
-      (data.sites || []).forEach(site => {
-        const opt = document.createElement('option'); opt.value = site.id; opt.textContent = site.name; s.appendChild(opt);
+    if (newLookupSig !== oldLookupSig) {
+      siteSelects.forEach(s => {
+        s.disabled = false;
+        s.innerHTML = '<option value="">اختر الموقع</option>';
+        (data.sites || []).forEach(site => {
+          const opt = document.createElement('option'); opt.value = site.id; opt.textContent = site.name; s.appendChild(opt);
+        });
       });
-    });
+    }
 
-    //========== تعبئة سيلكت الباقات ==========
     const pkgSelect = document.querySelector('select[name="package"]');
-    if (pkgSelect) {
+    if (pkgSelect && newLookupSig !== oldLookupSig) {
       pkgSelect.disabled = false;
       pkgSelect.innerHTML = '<option value="">اختر الباقة</option>';
       (data.packages || []).forEach(p => {
@@ -242,62 +248,62 @@ async function loadLookupsAndPopulate() {
     //========== إنشاء كروت الباقات ==========
     const pkgGrid = document.getElementById('packagesGrid');
     if (pkgGrid) {
-      // clear any skeletons but keep grid locked
-      hideLoadingSkeleton();
-      pkgGrid.innerHTML = '';
+      if (newLookupSig !== oldLookupSig) {
+        // clear any skeletons but keep grid locked
+        hideLoadingSkeleton();
+        pkgGrid.innerHTML = '';
 
-      // نجيب الباقة الحالية للمكان (لو المستخدم مسجل دخول)
-      const logged = getLoggedPlace();
-      const loggedPackageId = logged?.raw?.['الباقة'] || '';
-      const packageStatus = logged?.raw?.['حالة الباقة'] || '';
-      const isTrialUsed = String(logged?.raw?.['حالة الباقة التجريبية'] || '').toLowerCase() === 'true';
+        const logged = getLoggedPlace();
+        const loggedPackageId = logged?.raw?.['الباقة'] || '';
+        const packageStatus = logged?.raw?.['حالة الباقة'] || '';
+        const isTrialUsed = String(logged?.raw?.['حالة الباقة التجريبية'] || '').toLowerCase() === 'true';
 
-      (data.packages || []).forEach(p => {
-        const div = document.createElement('div'); 
-        div.className = 'pkg-card';
-        div.setAttribute('data-package-id', p.id);
+        (data.packages || []).forEach(p => {
+          const div = document.createElement('div'); 
+          div.className = 'pkg-card';
+          div.setAttribute('data-package-id', p.id);
 
-        const h = document.createElement('h3'); 
-        h.textContent = p.name;
+          const h = document.createElement('h3'); 
+          h.textContent = p.name;
 
-        const dur = Number(p.duration || (p.raw && (p.raw['مدة الباقة باليوم'] || p.raw['مدة'])) || 0) || 0;
-        const price = Number(p.price || (p.raw && (p.raw['سعر الباقة'] || p.raw['السعر'])) || 0) || 0;
-        const allowed = Number(p.allowedAds || (p.raw && (p.raw['عدد الاعلانات'] || p.raw['عدد_الاعلانات'])) || 0) || 0;
+          const dur = Number(p.duration || (p.raw && (p.raw['مدة الباقة باليوم'] || p.raw['مدة'])) || 0) || 0;
+          const price = Number(p.price || (p.raw && (p.raw['سعر الباقة'] || p.raw['السعر'])) || 0) || 0;
+          const allowed = Number(p.allowedAds || (p.raw && (p.raw['عدد الاعلانات'] || p.raw['عدد_الاعلانات'])) || 0) || 0;
 
-        const d = document.createElement('p'); 
-        d.textContent = `المدة: ${dur} يوم · السعر: ${price} · الإعلانات: ${allowed}`;
+          const d = document.createElement('p'); 
+          d.textContent = `المدة: ${dur} يوم · السعر: ${price} · الإعلانات: ${allowed}`;
 
-        const desc = document.createElement('p'); 
-        desc.textContent = p.raw && (p.raw['وصف الباقة'] || p.raw['description']) 
-          ? (p.raw['وصف الباقة'] || p.raw['description']) 
-          : '';
+          const desc = document.createElement('p'); 
+          desc.textContent = p.raw && (p.raw['وصف الباقة'] || p.raw['description']) 
+            ? (p.raw['وصف الباقة'] || p.raw['description']) 
+            : '';
 
-        const btn = document.createElement('button'); 
-        btn.className = 'choose-pkg'; 
-        btn.setAttribute('data-price', price);
-        btn.onclick = () => choosePackageAPI(p.id);
-        
-        // أثناء البناء: عطل كل الأزرار مؤقتاً لمنع الضغط بالخطأ
-        btn.disabled = true;
-        btn.style.opacity = '0.6';
-        btn.textContent = price === 0 ? '🚀 تفعيل تجريبي مجاني' : '💳 اختر هذه الباقة';
-        
-        // تعيين المظهر بناءً على الحالة (قد يغيّر النص والتعطيل)
-        if (loggedPackageId === String(p.id)) {
-          updatePackageCardAppearance(p.id, packageStatus, isTrialUsed);
-        } else {
-          updatePackageCardAppearance(p.id, '', isTrialUsed);
-        }
+          const btn = document.createElement('button'); 
+          btn.className = 'choose-pkg'; 
+          btn.setAttribute('data-price', price);
+          btn.onclick = () => choosePackageAPI(p.id);
+          
+          // أثناء البناء: عطل كل الأزرار مؤقتاً لمنع الضغط بالخطأ
+          btn.disabled = true;
+          btn.style.opacity = '0.6';
+          btn.textContent = price === 0 ? '🚀 تفعيل تجريبي مجاني' : '💳 اختر هذه الباقة';
+          
+          // تعيين المظهر بناءً على الحالة (قد يغيّر النص والتعطيل)
+          if (loggedPackageId === String(p.id)) {
+            updatePackageCardAppearance(p.id, packageStatus, isTrialUsed);
+          } else {
+            updatePackageCardAppearance(p.id, '', isTrialUsed);
+          }
 
-        div.appendChild(h); 
-        div.appendChild(d); 
-        if (desc.textContent) div.appendChild(desc); 
-        div.appendChild(btn);
-        pkgGrid.appendChild(div);
-      });
+          div.appendChild(h); 
+          div.appendChild(d); 
+          if (desc.textContent) div.appendChild(desc); 
+          div.appendChild(btn);
+          pkgGrid.appendChild(div);
+        });
+      }
     }
 
-    //========== باقي الإعدادات ==========
     window.availablePaymentMethods = (data.payments || data.paymentsMethods || []).map(pm => ({
       id: pm.id || pm.raw && pm.raw['معرف الدفع'], 
       name: pm.name || pm.raw && (pm.raw['طرق الدفع'] || pm.raw['طريقة الدفع']), 
@@ -316,18 +322,15 @@ async function loadLookupsAndPopulate() {
     if (typeof updateAdsTabVisibility === 'function') updateAdsTabVisibility();
     updateActivateButtonState();
     
-    // تحديث بطاقات الباقات بعد تحميل البيانات، ثم فك القفل
     setTimeout(() => {
-      if (typeof refreshAllPackageCards === 'function') {
+      if (typeof refreshAllPackageCards === 'function' && (newLookupSig !== oldLookupSig)) {
         refreshAllPackageCards();
       }
-      // فك القفل بعد التحديث مباشرة
       setPackagesInteractionEnabled(true);
     }, 0);
   } catch (err) {
     console.error('loadLookupsAndPopulate error', err);
   } finally {
-    // Skeleton OFF safeguard (التفاعل يُفك عند الانتهاء أعلاه)
     hideLoadingSkeleton();
   }
 }
@@ -752,6 +755,13 @@ async function loadAdsForPlace(placeId) {
     if (!resp.ok) { console.warn('loadAdsForPlace failed', resp); return; }
     const json = resp.data;
     const ads = (json && json.success && json.data && json.data.ads) ? json.data.ads : (json && json.ads) ? json.ads : (json && json.data && json.data) ? json.data : [];
+
+    // Change detection for ads list
+    const newSig = computeAdsSignature(ads);
+    const oldSig = window.lastAdsSignature || '';
+    if (newSig === oldSig) return;
+    window.lastAdsSignature = newSig;
+
     renderAdsList(Array.isArray(ads) ? ads : []);
   } catch (err) { console.error('loadAdsForPlace error', err); }
 }
@@ -891,6 +901,13 @@ async function checkAdQuotaAndToggle(placeId) {
     const resp = await apiFetch(`${API_URL}?action=remainingAds&placeId=${encodeURIComponent(placeId)}`);
     if (!resp.ok) { toggleAdFormAllowed(false, 'تعذر التحقق من الباقة'); return; }
     const data = resp.data && resp.data.data ? resp.data.data : resp.data;
+
+    // Change detection for quota
+    const newSig = computeQuotaSignature(data);
+    const oldSig = window.lastQuotaSignature || '';
+    if (newSig === oldSig) return;
+    window.lastQuotaSignature = newSig;
+
     const remaining = Number((data && data.remaining) || 0);
     const allowed = Number((data && data.allowed) || 0);
     const used = Number((data && data.used) || 0);
@@ -976,18 +993,18 @@ async function setLoggedInUI(place, skipRefresh = false) {
     showPackageStatusBar(place);
   } catch (e) { console.warn('could not show status bar', e); }
   updateActivateButtonState();
-  
+
   // ضمان أن الباقة المختارة تبقى معطلة
   ensurePackageSelectDisabled();
 
   // تحديث تلقائي للبيانات بعد 2 ثانية من تسجيل الدخول (فقط عند تسجيل الدخول الأولي)
   if (!skipRefresh) {
-    setTimeout(async () => {
-      await forceRefreshPlaceData(false); // تحديث صامت بدون رسائل
-    }, 2000);
+  setTimeout(async () => {
+    await forceRefreshPlaceData(false); // تحديث صامت بدون رسائل
+  }, 2000);
 
-    // بدء التحديث التلقائي الدوري
-    startAutoRefresh();
+  // بدء التحديث التلقائي الدوري
+  startAutoRefresh();
   }
 }
 
@@ -1464,8 +1481,8 @@ function startPackageStatusCountdown(endDate, countdownEl) {
     
     if (diff <= 0) {
       if (lastText !== 'انتهت' || lastClass !== 'package-countdown-display countdown-crit') {
-        countdownEl.textContent = 'انتهت';
-        countdownEl.className = 'package-countdown-display countdown-crit';
+      countdownEl.textContent = 'انتهت';
+      countdownEl.className = 'package-countdown-display countdown-crit';
         lastText = 'انتهت';
         lastClass = 'package-countdown-display countdown-crit';
       }
@@ -1794,7 +1811,7 @@ function parseDateISO(d) {
     // محاولة تحليل تنسيق YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
       console.log('matched YYYY-MM-DD format');
-      const parts = s.split('-');
+    const parts = s.split('-');
       const y = Number(parts[0]), m = Number(parts[1]) - 1, day = Number(parts[2]);
       if (isNaN(y) || isNaN(m) || isNaN(day)) return null;
       const dt = new Date(y, m, day);
@@ -2289,8 +2306,8 @@ async function forceRefreshPlaceData(showLoading = true) {
         // ضمان أن الباقة المختارة تبقى معطلة بعد التحديث
         ensurePackageSelectDisabled();
         
-        if (showLoading) {
-          showSuccess('تم تحديث البيانات من الخادم');
+      if (showLoading) {
+        showSuccess('تم تحديث البيانات من الخادم');
         }
       }
     } else {
@@ -2469,10 +2486,10 @@ async function refreshPackageUIFromDashboard() {
     if (pkgStatus === 'مفعلة') {
       if (btn) { btn.disabled = true; btn.style.opacity = '0.8'; btn.textContent = 'الاشتراك مُفعّل'; }
       if (hint) {
-        let msg = 'حالة الباقة: مفعلة';
-        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-          const sTxt = startDate.toISOString().split('T')[0];
-          const eTxt = endDate.toISOString().split('T')[0];
+      let msg = 'حالة الباقة: مفعلة';
+      if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        const sTxt = startDate.toISOString().split('T')[0];
+        const eTxt = endDate.toISOString().split('T')[0];
           msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
         }
         hint.textContent = msg;
@@ -2494,12 +2511,12 @@ async function refreshPackageUIFromDashboard() {
       clearPackageCountdown();
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'تجديد الاشتراك'; }
       if (hint) {
-        let msg = 'حالة الباقة: منتهية';
-        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-          const sTxt = startDate.toISOString().split('T')[0];
-          const eTxt = endDate.toISOString().split('T')[0];
-          msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
-        }
+      let msg = 'حالة الباقة: منتهية';
+      if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        const sTxt = startDate.toISOString().split('T')[0];
+        const eTxt = endDate.toISOString().split('T')[0];
+        msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+      }
         hint.textContent = msg;
         hint.classList.add('expired');
       }
@@ -2827,6 +2844,40 @@ function computePlaceStateSignature(place) {
       // extend here if other UI-affecting fields are relevant
     };
     return JSON.stringify(sig);
+  } catch { return ''; }
+}
+
+// Change detection helpers for smarter auto-refresh
+function computeLookupsSignature(data) {
+  try {
+    const sig = {
+      activities: (data.activities || []).length,
+      cities: (data.cities || []).length,
+      areas: (data.areas || []).length,
+      sites: (data.sites || []).length,
+      packages: (data.packages || []).map(p => `${p.id}:${p.name}:${p.duration || (p.raw && (p.raw['مدة الباقة باليوم'] || p.raw['مدة'])) || ''}:${p.price || (p.raw && (p.raw['سعر الباقة'] || p.raw['السعر'])) || ''}`).join('|')
+    };
+    return JSON.stringify(sig);
+  } catch { return ''; }
+}
+function computeQuotaSignature(payload) {
+  try {
+    return JSON.stringify({
+      remaining: Number(payload && payload.remaining || 0),
+      allowed: Number(payload && payload.allowed || 0),
+      used: Number(payload && payload.used || 0)
+    });
+  } catch { return ''; }
+}
+function computeAdsSignature(ads) {
+  try {
+    const arr = Array.isArray(ads) ? ads : [];
+    const key = arr
+      .map(a => ({ id: a.id || a.adId || a['معرف الإعلان'] || '', s: a.status || '', b: a.startDate || '', e: a.endDate || '', u: a.updatedAt || a.updated || '' }))
+      .sort((x, y) => String(x.id).localeCompare(String(y.id)))
+      .map(x => `${x.id}:${x.s}:${x.b}:${x.e}:${x.u}`)
+      .join('|');
+    return key;
   } catch { return ''; }
 }
 
