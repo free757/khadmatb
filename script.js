@@ -11,7 +11,7 @@ const THEME_KEY = 'ban_theme';
 
 // متغيرات التحديث التلقائي
 let autoRefreshInterval = null;
-const AUTO_REFRESH_INTERVAL = 60000; // 30 ثانية
+const AUTO_REFRESH_INTERVAL = 30000; // 30 ثانية
 
 /* ========== Theme ========== */
 function applyTheme(theme) {
@@ -172,6 +172,9 @@ function setupEventListeners() {
 /* ========== Lookups & populate ========== */
 async function loadLookupsAndPopulate() {
   try {
+    // Skeleton ON
+    showLoadingSkeleton();
+
     const resp = await apiFetch(`${API_URL}?action=getLookups`);
     if (!resp.ok) { console.warn('getLookups failed', resp); return; }
     const json = resp.data;
@@ -183,6 +186,7 @@ async function loadLookupsAndPopulate() {
     //========== تعبئة القوائم (نشاط / مدينة / منطقة / مواقع) ==========
     const actSelect = document.querySelector('select[name="activityType"]');
     if (actSelect) {
+      actSelect.disabled = false;
       actSelect.innerHTML = '<option value="">اختر نوع النشاط</option>';
       (data.activities || []).forEach(a => {
         const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name; actSelect.appendChild(opt);
@@ -191,6 +195,7 @@ async function loadLookupsAndPopulate() {
 
     const citySelect = document.querySelector('select[name="city"]');
     if (citySelect) {
+      citySelect.disabled = false;
       citySelect.innerHTML = '<option value="">اختر المدينة</option>';
       (data.cities || []).forEach(c => {
         const opt = document.createElement('option'); opt.value = c.id; opt.textContent = c.name; citySelect.appendChild(opt);
@@ -207,6 +212,7 @@ async function loadLookupsAndPopulate() {
 
     const siteSelects = document.querySelectorAll('select[name="location"]');
     siteSelects.forEach(s => {
+      s.disabled = false;
       s.innerHTML = '<option value="">اختر الموقع</option>';
       (data.sites || []).forEach(site => {
         const opt = document.createElement('option'); opt.value = site.id; opt.textContent = site.name; s.appendChild(opt);
@@ -216,6 +222,7 @@ async function loadLookupsAndPopulate() {
     //========== تعبئة سيلكت الباقات ==========
     const pkgSelect = document.querySelector('select[name="package"]');
     if (pkgSelect) {
+      pkgSelect.disabled = false;
       pkgSelect.innerHTML = '<option value="">اختر الباقة</option>';
       (data.packages || []).forEach(p => {
         const opt = document.createElement('option');
@@ -234,6 +241,8 @@ async function loadLookupsAndPopulate() {
     //========== إنشاء كروت الباقات ==========
     const pkgGrid = document.getElementById('packagesGrid');
     if (pkgGrid) {
+      // clear any skeletons
+      hideLoadingSkeleton();
       pkgGrid.innerHTML = '';
 
       // نجيب الباقة الحالية للمكان (لو المستخدم مسجل دخول)
@@ -269,7 +278,7 @@ async function loadLookupsAndPopulate() {
         
         // تعيين النص الافتراضي للزر
         btn.textContent = price === 0 ? '🚀 تفعيل تجريبي مجاني' : '💳 اختر هذه الباقة';
-
+        
         // تحديث مظهر البطاقة بناءً على الحالة
         if (loggedPackageId === String(p.id)) {
           updatePackageCardAppearance(p.id, packageStatus, isTrialUsed);
@@ -312,6 +321,9 @@ async function loadLookupsAndPopulate() {
     }, 500);
   } catch (err) {
     console.error('loadLookupsAndPopulate error', err);
+  } finally {
+    // Skeleton OFF (safety)
+    hideLoadingSkeleton();
   }
 }
 
@@ -2670,7 +2682,7 @@ function setupWhatsappAutoFill() {
       if (s.startsWith('00')) s = s.slice(2);
       // إذا لا يوجد طول كافٍ، لا تنشئ رابطاً
       if (s.length < 8) return '';
-      return `https://wa.me/+20${s}`;
+      return `https://wa.me/${s}`;
     };
 
     const maybeFill = () => {
@@ -2702,5 +2714,70 @@ function setupWhatsappAutoFill() {
     waInput.addEventListener('input', userHandler);
     waInput._waUserHandler = userHandler;
   } catch (e) { console.warn('setupWhatsappAutoFill error', e); }
+}
+
+/* ========== Skeleton loading helpers ========== */
+function ensureSkeletonStyles() {
+  if (document.getElementById('skeletonStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'skeletonStyles';
+  style.textContent = `
+    .skel { position: relative; overflow: hidden; background: #eee; border-radius: 8px; }
+    .skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.6) 50%, rgba(255,255,255,0) 100%); animation: skel 1.2s infinite; }
+    @keyframes skel { 100% { transform: translateX(100%); } }
+    .skeleton-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #eee; border-radius: 10px; background: #fafafa; }
+    .skel-line { height: 12px; }
+    .skel-h { height: 18px; }
+    .skel-btn { height: 36px; }
+    .skel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  `;
+  document.head.appendChild(style);
+}
+function renderPackagesSkeleton() {
+  ensureSkeletonStyles();
+  const grid = document.getElementById('packagesGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'skel-grid';
+  const count = 6;
+  for (let i = 0; i < count; i++) {
+    const card = document.createElement('div'); card.className = 'skeleton-card';
+    const h = document.createElement('div'); h.className = 'skel skel-h';
+    const l1 = document.createElement('div'); l1.className = 'skel skel-line';
+    const l2 = document.createElement('div'); l2.className = 'skel skel-line';
+    const btn = document.createElement('div'); btn.className = 'skel skel-btn';
+    card.appendChild(h); card.appendChild(l1); card.appendChild(l2); card.appendChild(btn);
+    wrap.appendChild(card);
+  }
+  grid.appendChild(wrap);
+}
+function showLoadingSkeleton() {
+  // Disable selects with loading option
+  const actSelect = document.querySelector('select[name="activityType"]');
+  const citySelect = document.querySelector('select[name="city"]');
+  const areaSelect = document.querySelector('select[name="area"]');
+  const locSelects = document.querySelectorAll('select[name="location"]');
+  const pkgSelect = document.querySelector('select[name="package"]');
+  const setLoading = (sel) => { if (!sel) return; sel.innerHTML = '<option value="">جارِ التحميل...</option>'; sel.disabled = true; };
+  setLoading(actSelect);
+  setLoading(citySelect);
+  setLoading(areaSelect);
+  locSelects.forEach(setLoading);
+  setLoading(pkgSelect);
+  // Packages skeleton
+  renderPackagesSkeleton();
+}
+function hideLoadingSkeleton() {
+  // Re-enable selects (actual options will be filled by loaders)
+  const selects = document.querySelectorAll('select[name="activityType"], select[name="city"], select[name="area"], select[name="location"], select[name="package"]');
+  selects.forEach(s => { if (s) s.disabled = false; });
+  // Clear skeleton grid wrapper if exists (packagesGrid will be rebuilt by loader)
+  const grid = document.getElementById('packagesGrid');
+  if (grid) {
+    // leave clearing to loader; just ensure not to accumulate skeletons
+    const skelWraps = grid.querySelectorAll('.skel-grid');
+    skelWraps.forEach(w => w.remove());
+  }
 }
 
