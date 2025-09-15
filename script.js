@@ -2368,6 +2368,7 @@ async function refreshPackageUIFromDashboard() {
     const hint = document.getElementById('activateHint');
     const btn = document.getElementById('activatePackageBtn');
 
+    // عناصر بطاقات المعلومات داخل التبويبات (سيتم إخفاؤها دائماً)
     const card = document.getElementById('currentPackageCard');
     const cardText = document.getElementById('currentPackageText');
     const cardCountdown = document.getElementById('currentPackageCountdown');
@@ -2376,10 +2377,11 @@ async function refreshPackageUIFromDashboard() {
     const inlineText = document.getElementById('packageInfoText');
     const inlineCountdown = document.getElementById('packageInfoCountdown');
 
+    // تنظيف أولي وإخفاء البطاقات والعدادات بشكل دائم
     if (hint) hint.classList.remove('active','pending','expired');
-    [card, inlineCard].forEach(c => { if (c) c.style.display = 'none'; });
-    [cardText, inlineText].forEach(t => { if (t) t.textContent = ''; });
-    [cardCountdown, inlineCountdown].forEach(cd => { if (cd) { cd.textContent = ''; cd.className = 'package-countdown'; clearInterval(cd && cd._timer); } });
+    ;[card, inlineCard].forEach(c => { if (c) c.style.display = 'none'; });
+    ;[cardText, inlineText].forEach(t => { if (t) t.textContent = ''; });
+    ;[cardCountdown, inlineCountdown].forEach(cd => { if (cd) { clearInterval(cd._timer); cd._timer = null; cd.textContent = ''; cd.className = 'package-countdown'; cd.style.display = 'none'; } });
 
     if (!logged || !logged.id) {
       if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
@@ -2393,100 +2395,33 @@ async function refreshPackageUIFromDashboard() {
     if (!place || !place.raw) return;
 
     const pkgStatus = String(place.raw['حالة الباقة'] || place.raw['packageStatus'] || '').trim();
-    const pkgId = String(place.raw['الباقة'] || place.package || '').trim();
     const startRaw = place.raw['تاريخ بداية الاشتراك'] || place.packageStart || '';
     const endRaw = place.raw['تاريخ نهاية الاشتراك'] || place.packageEnd || '';
     const startDate = parseDateISO(startRaw);
     const endDate = parseDateISO(endRaw);
-    const today = new Date();
 
-    // اسم الباقة من lookups إن توفر
-    let packageName = '';
-    try {
-      if (window.lastLookups && Array.isArray(lastLookups.packages)) {
-        const f = lastLookups.packages.find(p => String(p.id) === pkgId);
-        if (f) packageName = f.name;
-      }
-    } catch {}
-
-    let remaining = (startDate && endDate) ? daysBetween(today, endDate) : null;
-    if (remaining !== null && remaining < 0) remaining = 0;
-
-    function setCountdown(el, end) {
-      if (!el || !end) return;
-      const update = () => {
-        const dh = diffDaysHours(new Date(), end);
-        const days = dh.days ?? 0;
-        const hours = dh.hours ?? 0;
-        const minutes = Math.floor((dh.ms % (1000 * 60 * 60)) / (1000 * 60));
-        
-        // عرض العدّاد بتنسيق أفضل
-        let countdownText = '';
-        if (days > 0) {
-          countdownText = `العدّاد: ${days} يوم`;
-          if (hours > 0) {
-            countdownText += ` و${hours} ساعة`;
-          }
-        } else if (hours > 0) {
-          countdownText = `العدّاد: ${hours} ساعة`;
-          if (minutes > 0) {
-            countdownText += ` و${minutes} دقيقة`;
-          }
-        } else {
-          countdownText = `العدّاد: ${minutes} دقيقة`;
-        }
-        
-        el.textContent = countdownText;
-        el.classList.remove('countdown-ok','countdown-warn','countdown-crit');
-        if (dh.ms <= 48*60*60*1000) el.classList.add('countdown-crit');
-        else if (dh.ms <= 7*24*60*60*1000) el.classList.add('countdown-warn');
-        else el.classList.add('countdown-ok');
-      };
-      update();
-      clearInterval(el._timer);
-      el._timer = setInterval(update, 60 * 1000);
-    }
-
-    // عرض حسب الحالة
+    // تحديث حالة الزر والتنبيه فقط، مع عدم إظهار أي معلومات تفصيلية عن الباقة هنا
     if (!pkgStatus) {
       clearPackageCountdown();
-      if (hint) hint.textContent = 'حالة الباقة: لا يوجد اشتراك';
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'تفعيل الاشتراك'; }
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      if (cardText) cardText.textContent = 'باقتك الحالية: لا يوجد اشتراك';
-      if (inlineText) inlineText.textContent = 'باقتك الحالية: لا يوجد اشتراك';
+      if (hint) hint.textContent = 'حالة الباقة: لا يوجد اشتراك';
       return;
     }
 
     if (pkgStatus === 'مفعلة') {
       if (btn) { btn.disabled = true; btn.style.opacity = '0.8'; btn.textContent = 'الاشتراك مُفعّل'; }
-      let msg = 'حالة الباقة: مفعلة';
-      if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-        const sTxt = startDate.toISOString().split('T')[0];
-        const eTxt = endDate.toISOString().split('T')[0];
-        msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}${remaining !== null ? ` · المتبقي: ${remaining} يوم` : ''}`;
+      if (hint) {
+        let msg = 'حالة الباقة: مفعلة';
+        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+          const sTxt = startDate.toISOString().split('T')[0];
+          const eTxt = endDate.toISOString().split('T')[0];
+          msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+        }
+        hint.textContent = msg;
+        hint.classList.add('active');
       }
-      if (hint) { hint.textContent = msg; hint.classList.add('active'); }
-
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      const remTxt = remaining !== null ? ` — المتبقي ${remaining} يوم` : '';
-      if (cardText) cardText.textContent = `باقتك الحالية: ${pn}${eTxt ? ` — تنتهي في ${eTxt}` : ''}${remTxt}`;
-      if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn}${eTxt ? ` — تنتهي في ${eTxt}` : ''}${remTxt}`;
-
-      if (endDate) {
-        // عرض العدّاد في بطاقة تبويب الباقات
-        if (cardCountdown) setCountdown(cardCountdown, endDate);
-        // عدّاد نصي بجانب الزر القديم
-        const daysLeft = daysBetween(today, endDate);
-        if (daysLeft !== null && daysLeft <= 30) startPackageCountdown(endDate); else clearPackageCountdown();
-        // عدّاد بطاقة النموذج
-        if (inlineCountdown) setCountdown(inlineCountdown, endDate);
-      }
+      // لا نظهر أي عدادات/بطاقات هنا
+      clearPackageCountdown();
       return;
     }
 
@@ -2494,31 +2429,22 @@ async function refreshPackageUIFromDashboard() {
       clearPackageCountdown();
       if (btn) { btn.disabled = true; btn.style.opacity = '0.8'; btn.textContent = 'قيد التحقق من الدفع'; }
       if (hint) { hint.textContent = 'سيتم التأكد من عملية الدفع و التفعيل خلال لحظات'; hint.classList.add('pending'); }
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      if (cardText) cardText.textContent = `باقتك الحالية: ${pn} — الحالة: قيد الدفع`;
-      if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn} — الحالة: قيد الدفع`;
       return;
     }
 
     if (pkgStatus === 'منتهية') {
       clearPackageCountdown();
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'تجديد الاشتراك'; }
-      let msg = 'حالة الباقة: منتهية';
-      if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-        const sTxt = startDate.toISOString().split('T')[0];
-        const eTxt = endDate.toISOString().split('T')[0];
-        msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+      if (hint) {
+        let msg = 'حالة الباقة: منتهية';
+        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+          const sTxt = startDate.toISOString().split('T')[0];
+          const eTxt = endDate.toISOString().split('T')[0];
+          msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+        }
+        hint.textContent = msg;
+        hint.classList.add('expired');
       }
-      if (hint) { hint.textContent = msg; hint.classList.add('expired'); }
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      if (cardText) cardText.textContent = `باقتك الحالية: ${pn} — الحالة: منتهية${eTxt ? ` — انتهت في ${eTxt}` : ''}`;
-      if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn} — الحالة: منتهية${eTxt ? ` — انتهت في ${eTxt}` : ''}`;
       return;
     }
 
@@ -2526,10 +2452,6 @@ async function refreshPackageUIFromDashboard() {
     clearPackageCountdown();
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = (pkgStatus.indexOf('منته') !== -1) ? 'تجديد الاشتراك' : 'تفعيل الاشتراك'; }
     if (hint) hint.textContent = `حالة الباقة: ${pkgStatus}`;
-    [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-    const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-    if (cardText) cardText.textContent = `باقتك الحالية: ${pn} — الحالة: ${pkgStatus}`;
-    if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn} — الحالة: ${pkgStatus}`;
   } catch (e) {
     console.warn('refreshPackageUIFromDashboard error', e);
   }
