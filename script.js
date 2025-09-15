@@ -479,17 +479,51 @@ function previewVideo(input, previewId) {
 }
 
 /* ========== Upload helper ========== */
-async function readFileAsBase64(file) {
+async function readFileAsBase64(file, onProgress) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => { const result = reader.result; const base64 = String(result).split(',')[1] || ''; resolve(base64); };
+    reader.onload = () => {
+      const result = reader.result; const base64 = String(result).split(',')[1] || '';
+      if (typeof onProgress === 'function') { try { onProgress(100); } catch(e){} }
+      resolve(base64);
+    };
     reader.onerror = reject;
+    reader.onprogress = (evt) => {
+      if (evt && evt.lengthComputable && typeof onProgress === 'function') {
+        const percent = Math.floor((evt.loaded / Math.max(1, evt.total)) * 100);
+        try { onProgress(percent); } catch(e){}
+      }
+    };
     reader.readAsDataURL(file);
   });
 }
-async function uploadToGoogleDrive(file, folder, placeId = null) {
+async function uploadToGoogleDrive(file, folder, placeId = null, uiKey = null) {
   if (!API_URL || !API_URL.startsWith('http')) return `https://drive.google.com/file/d/${Math.random().toString(36).substr(2, 9)}/view`;
-  const base64 = await readFileAsBase64(file);
+  const progressEls = (() => {
+    if (!uiKey) return null;
+    if (uiKey === 'place') return {
+      wrap: document.getElementById('placeUploadProgress'),
+      bar: document.getElementById('placeUploadProgressBar'),
+      text: document.getElementById('placeUploadProgressText')
+    };
+    if (uiKey === 'ad') return {
+      wrap: document.getElementById('adUploadProgress'),
+      bar: document.getElementById('adUploadProgressBar'),
+      text: document.getElementById('adUploadProgressText')
+    };
+    return null;
+  })();
+
+  const setProgress = (p, msg) => {
+    if (!progressEls || !progressEls.bar || !progressEls.wrap) return;
+    progressEls.wrap.style.display = 'block';
+    progressEls.bar.style.width = `${Math.max(0, Math.min(100, p))}%`;
+    if (progressEls.text) progressEls.text.textContent = `${msg || 'جارٍ الرفع...'} ${Math.max(0, Math.min(100, Math.floor(p)))}%`;
+  };
+
+  try { setProgress(1, 'قراءة الملف...'); } catch(e){}
+  const base64 = await readFileAsBase64(file, (p)=> setProgress(Math.min(90, p), 'تحضير الملف...'));
+  try { setProgress(90, 'جارٍ الرفع...'); } catch(e){}
   const form = new FormData();
   form.append('action', 'uploadFile');
   form.append('folder', folder);
@@ -504,6 +538,9 @@ async function uploadToGoogleDrive(file, folder, placeId = null) {
   const fileUrl = (up && (up.fileUrl || up.url)) || (resp && resp.fileUrl) || '';
   if (fileUrl) recentUploads[file.name] = { url: fileUrl, name: file.name };
   if (!fileUrl) throw new Error('تعذر استخراج رابط الملف من استجابة الخادم');
+  try { setProgress(100, 'تم الرفع'); } catch(e){}
+  // إخفاء المؤشر بعد قليل
+  if (progressEls && progressEls.wrap) { setTimeout(()=> { try { progressEls.wrap.style.display = 'none'; } catch(e){} }, 1200); }
   return fileUrl;
 }
 
@@ -561,7 +598,7 @@ async function handlePlaceSubmit(ev) {
     let imageUrl = '';
     if (placeData.image) {
       const placeIdForUpload = (logged && logged.id) ? logged.id : null;
-      imageUrl = await uploadToGoogleDrive(placeData.image, 'places', placeIdForUpload);
+      imageUrl = await uploadToGoogleDrive(placeData.image, 'places', placeIdForUpload, 'place');
     }
 
     const payload = { action: (logged && logged.id) ? 'updatePlace' : 'registerPlace' };
@@ -636,13 +673,38 @@ async function handleAdSubmit(ev) {
     if (!validateFiles()) { showLoading(false); return; }
 
     const imageUrls = [];
+    // إنشاء عناصر تقدم فردية لكل صورة
+    const filesProgressWrap = document.getElementById('adUploadFilesProgress');
+    if (filesProgressWrap) { filesProgressWrap.innerHTML = ''; filesProgressWrap.style.display = adData.images.length ? 'block' : 'none'; }
+
     for (let i = 0; i < Math.min(adData.images.length, 8); i++) {
       const file = adData.images[i];
-      const url = await uploadToGoogleDrive(file, 'ads');
+      let perFileBar = null, perFileText = null, perFileRow = null;
+      if (filesProgressWrap) {
+        perFileRow = document.createElement('div');
+        perFileRow.style.marginBottom = '8px';
+        perFileRow.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:13px">
+            <span>${file.name}</span>
+            <span class="percent">0%</span>
+          </div>
+          <div style="background: var(--border-color); height: 6px; border-radius: 6px; overflow: hidden;">
+            <div class="bar" style="height: 100%; width: 0%; background: var(--primary-color); transition: width .2s;"></div>
+          </div>
+        `;
+        filesProgressWrap.appendChild(perFileRow);
+        perFileBar = perFileRow.querySelector('.bar');
+        perFileText = perFileRow.querySelector('.percent');
+      }
+
+      const url = await uploadToGoogleDrive(file, 'ads', null, 'ad');
+      if (perFileBar) perFileBar.style.width = '100%';
+      if (perFileText) perFileText.textContent = '100%';
       imageUrls.push({ name: file.name, url });
     }
+    if (filesProgressWrap) { setTimeout(()=> { filesProgressWrap.style.display = 'none'; }, 1500); }
     let videoUrl = '';
-    if (adData.video) videoUrl = await uploadToGoogleDrive(adData.video, 'ads');
+    if (adData.video) videoUrl = await uploadToGoogleDrive(adData.video, 'ads', null, 'ad');
 
     imageUrls.forEach(i => { recentUploads[i.name] = { url: i.url, name: i.name }; });
 
@@ -2880,4 +2942,3 @@ function computeAdsSignature(ads) {
     return key;
   } catch { return ''; }
 }
-
