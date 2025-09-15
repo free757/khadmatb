@@ -46,21 +46,42 @@ function initTheme() {
 }
 
 /* ========== API helpers ========== */
-async function apiFetch(url, opts = {}) {
-  try {
-    const res = await fetch(url, opts);
-    const text = await res.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch (e) { data = text; }
-    return { ok: res.ok, status: res.status, data, raw: text };
-  } catch (err) {
-    return { ok: false, status: 0, error: err.message || String(err) };
+async function apiFetch(url, opts = {}, retries = 3, delay = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, opts);
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (e) { data = text; }
+      return { ok: res.ok, status: res.status, data, raw: text };
+    } catch (err) {
+      const isLastAttempt = attempt === retries;
+      const isNetworkError = err.message.includes('Failed to fetch') || 
+                            err.message.includes('ERR_NETWORK_CHANGED') ||
+                            err.message.includes('NetworkError');
+      
+      console.warn(`API fetch attempt ${attempt}/${retries} failed:`, err.message);
+      
+      if (isLastAttempt) {
+        return { ok: false, status: 0, error: err.message || String(err) };
+      }
+      
+      // فقط أعد المحاولة للأخطاء الشبكية
+      if (isNetworkError) {
+        const backoffDelay = delay * Math.pow(2, attempt - 1);
+        console.log(`Retrying in ${backoffDelay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+      } else {
+        // للأخطاء الأخرى، لا تعيد المحاولة
+        return { ok: false, status: 0, error: err.message || String(err) };
+      }
+    }
   }
 }
-async function apiPost(payload) {
+async function apiPost(payload, retries = 3) {
   try {
     if (payload instanceof FormData) {
-      return await apiFetch(API_URL, { method: 'POST', body: payload });
+      return await apiFetch(API_URL, { method: 'POST', body: payload }, retries);
     }
     if (typeof payload === 'object' && payload !== null) {
       const form = new FormData();
@@ -69,9 +90,9 @@ async function apiPost(payload) {
         if (v !== null && typeof v === 'object') form.append(k, JSON.stringify(v));
         else form.append(k, v === undefined ? '' : v);
       }
-      return await apiFetch(API_URL, { method: 'POST', body: form });
+      return await apiFetch(API_URL, { method: 'POST', body: form }, retries);
     }
-    return await apiFetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: String(payload) });
+    return await apiFetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: String(payload) }, retries);
   } catch (err) {
     return { ok: false, status: 0, error: err.message || String(err) };
   }
@@ -118,12 +139,18 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeApp() {
-  const today = new Date().toISOString().split('T')[0];
-  const startInput = document.querySelector('input[name="startDate"]');
-  const endInput = document.querySelector('input[name="endDate"]');
-  if (startInput) startInput.value = today;
-  const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
-  if (endInput) endInput.value = nextWeek.toISOString().split('T')[0];
+  try {
+    setupAuthUI();
+    setupTabs();
+    setupForms();
+    loadLookupsAndPopulate();
+    loadPlacesForAds();
+    restoreThemeFromStorage();
+    // إضافة تحسينات إدخال ساعات العمل
+    enhanceWorkingHoursInput();
+    // تهيئة تعبئة رابط واتساب تلقائياً من رقم التواصل
+    setupWhatsappAutoFill();
+  } catch (e) { console.error('initializeApp error', e); }
 }
 
 /* ========== Event listeners ========== */
@@ -145,6 +172,10 @@ function setupEventListeners() {
 /* ========== Lookups & populate ========== */
 async function loadLookupsAndPopulate() {
   try {
+    // Skeleton ON + lock interactions
+    showLoadingSkeleton();
+    setPackagesInteractionEnabled(false);
+
     const resp = await apiFetch(`${API_URL}?action=getLookups`);
     if (!resp.ok) { console.warn('getLookups failed', resp); return; }
     const json = resp.data;
@@ -156,6 +187,7 @@ async function loadLookupsAndPopulate() {
     //========== تعبئة القوائم (نشاط / مدينة / منطقة / مواقع) ==========
     const actSelect = document.querySelector('select[name="activityType"]');
     if (actSelect) {
+      actSelect.disabled = false;
       actSelect.innerHTML = '<option value="">اختر نوع النشاط</option>';
       (data.activities || []).forEach(a => {
         const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name; actSelect.appendChild(opt);
@@ -164,6 +196,7 @@ async function loadLookupsAndPopulate() {
 
     const citySelect = document.querySelector('select[name="city"]');
     if (citySelect) {
+      citySelect.disabled = false;
       citySelect.innerHTML = '<option value="">اختر المدينة</option>';
       (data.cities || []).forEach(c => {
         const opt = document.createElement('option'); opt.value = c.id; opt.textContent = c.name; citySelect.appendChild(opt);
@@ -180,6 +213,7 @@ async function loadLookupsAndPopulate() {
 
     const siteSelects = document.querySelectorAll('select[name="location"]');
     siteSelects.forEach(s => {
+      s.disabled = false;
       s.innerHTML = '<option value="">اختر الموقع</option>';
       (data.sites || []).forEach(site => {
         const opt = document.createElement('option'); opt.value = site.id; opt.textContent = site.name; s.appendChild(opt);
@@ -189,6 +223,7 @@ async function loadLookupsAndPopulate() {
     //========== تعبئة سيلكت الباقات ==========
     const pkgSelect = document.querySelector('select[name="package"]');
     if (pkgSelect) {
+      pkgSelect.disabled = false;
       pkgSelect.innerHTML = '<option value="">اختر الباقة</option>';
       (data.packages || []).forEach(p => {
         const opt = document.createElement('option');
@@ -207,6 +242,8 @@ async function loadLookupsAndPopulate() {
     //========== إنشاء كروت الباقات ==========
     const pkgGrid = document.getElementById('packagesGrid');
     if (pkgGrid) {
+      // clear any skeletons but keep grid locked
+      hideLoadingSkeleton();
       pkgGrid.innerHTML = '';
 
       // نجيب الباقة الحالية للمكان (لو المستخدم مسجل دخول)
@@ -240,10 +277,12 @@ async function loadLookupsAndPopulate() {
         btn.setAttribute('data-price', price);
         btn.onclick = () => choosePackageAPI(p.id);
         
-        // تعيين النص الافتراضي للزر
+        // أثناء البناء: عطل كل الأزرار مؤقتاً لمنع الضغط بالخطأ
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
         btn.textContent = price === 0 ? '🚀 تفعيل تجريبي مجاني' : '💳 اختر هذه الباقة';
-
-        // تحديث مظهر البطاقة بناءً على الحالة
+        
+        // تعيين المظهر بناءً على الحالة (قد يغيّر النص والتعطيل)
         if (loggedPackageId === String(p.id)) {
           updatePackageCardAppearance(p.id, packageStatus, isTrialUsed);
         } else {
@@ -277,14 +316,19 @@ async function loadLookupsAndPopulate() {
     if (typeof updateAdsTabVisibility === 'function') updateAdsTabVisibility();
     updateActivateButtonState();
     
-    // تحديث بطاقات الباقات بعد تحميل البيانات
+    // تحديث بطاقات الباقات بعد تحميل البيانات، ثم فك القفل
     setTimeout(() => {
       if (typeof refreshAllPackageCards === 'function') {
         refreshAllPackageCards();
       }
-    }, 500);
+      // فك القفل بعد التحديث مباشرة
+      setPackagesInteractionEnabled(true);
+    }, 0);
   } catch (err) {
     console.error('loadLookupsAndPopulate error', err);
+  } finally {
+    // Skeleton OFF safeguard (التفاعل يُفك عند الانتهاء أعلاه)
+    hideLoadingSkeleton();
   }
 }
 
@@ -470,6 +514,23 @@ async function handlePlaceSubmit(ev) {
   try {
     const form = ev.target;
     const formData = new FormData(form);
+
+    // قبل الإرسال: إن لم يوجد رابط واتساب وحقل الهاتف موجود، أنشئه تلقائياً
+    try {
+      const phoneVal = formData.get('phone');
+      const waVal = formData.get('whatsappLink');
+      if ((!waVal || String(waVal).trim() === '') && phoneVal) {
+        let s = String(phoneVal).trim();
+        s = s.replace(/\+/g, '').replace(/\D/g, '');
+        if (s.startsWith('00')) s = s.slice(2);
+        if (s.length >= 8) {
+          formData.set('whatsappLink', `https://wa.me/${s}`);
+          const waInput = document.querySelector('input[name="whatsappLink"]');
+          if (waInput) waInput.value = formData.get('whatsappLink');
+        }
+      }
+    } catch {}
+
     const placeData = {
       placeName: formData.get('placeName'),
       activityType: formData.get('activityType'),
@@ -896,7 +957,7 @@ function getLoggedPlace() { try { const raw = localStorage.getItem('khedmatak_pl
 function setLoggedPlace(obj) { try { localStorage.setItem('khedmatak_place', JSON.stringify(obj)); } catch (e) {} }
 function clearLoggedPlace() { localStorage.removeItem('khedmatak_place'); }
 
-async function setLoggedInUI(place) {
+async function setLoggedInUI(place, skipRefresh = false) {
   const loginBtn = document.getElementById('loginBtn'); const logoutBtn = document.getElementById('logoutBtn'); const loggedInUser = document.getElementById('loggedInUser');
   if (loginBtn) loginBtn.style.display = 'none'; if (logoutBtn) logoutBtn.style.display = 'inline-block'; if (loggedInUser) { loggedInUser.style.display = 'inline-block'; loggedInUser.textContent = (place && place.name) ? place.name : 'صاحب المحل'; }
   const loginModal = document.getElementById('loginModal'); if (loginModal) loginModal.style.display = 'none';
@@ -913,14 +974,19 @@ async function setLoggedInUI(place) {
     showPackageStatusBar(place);
   } catch (e) { console.warn('could not show status bar', e); }
   updateActivateButtonState();
+  
+  // ضمان أن الباقة المختارة تبقى معطلة
+  ensurePackageSelectDisabled();
 
-  // تحديث تلقائي للبيانات بعد 2 ثانية من تسجيل الدخول
-  setTimeout(async () => {
-    await forceRefreshPlaceData(false); // تحديث صامت بدون رسائل
-  }, 2000);
+  // تحديث تلقائي للبيانات بعد 2 ثانية من تسجيل الدخول (فقط عند تسجيل الدخول الأولي)
+  if (!skipRefresh) {
+    setTimeout(async () => {
+      await forceRefreshPlaceData(false); // تحديث صامت بدون رسائل
+    }, 2000);
 
-  // بدء التحديث التلقائي الدوري
-  startAutoRefresh();
+    // بدء التحديث التلقائي الدوري
+    startAutoRefresh();
+  }
 }
 
 function setLoggedOutUI() {
@@ -931,6 +997,16 @@ function setLoggedOutUI() {
   hidePackageStatusBar();
   const tabAds = document.getElementById('tab-ads'); if (tabAds) tabAds.style.display = 'none';
   const placeSelects = document.querySelectorAll('select[name="placeId"]'); placeSelects.forEach(ps => { ps.disabled = false; });
+  
+  // تمكين select الباقة مرة أخرى عند تسجيل الخروج
+  const packageSelect = document.querySelector('select[name="package"]');
+  if (packageSelect) {
+    packageSelect.disabled = false;
+    packageSelect.style.opacity = '1';
+    packageSelect.style.cursor = 'default';
+    packageSelect.title = '';
+  }
+  
   if (typeof updateAdsTabVisibility === 'function') updateAdsTabVisibility();
   updateActivateButtonState();
   
@@ -967,6 +1043,15 @@ async function tryPrefillPlaceForm(place) {
 
     // تحدّيث بطاقة معلومات الباقة في نموذج المكان
     updateInlinePackageInfoCard(place);
+    
+    // ضمان أن الباقة المختارة تبقى معطلة
+    ensurePackageSelectDisabled();
+
+    // إعادة تهيئة أدوات ساعات العمل بعد الملء
+    enhanceWorkingHoursInput();
+
+    // تفعيل التوليد التلقائي لرابط واتساب بعد الملء
+    setupWhatsappAutoFill();
   } catch (e) { console.warn('tryPrefillPlaceForm failed', e); }
 }
 
@@ -989,7 +1074,16 @@ function setSelectValueWhenReady(selector, val, retries = 12, interval = 200) {
       const sel = (typeof selector === 'string') ? document.querySelector(selector) : selector;
       if (sel) {
         const ok = setSelectByValueOrText(sel, val);
-        if (ok) { resolve(true); return; }
+        if (ok) { 
+          // إذا كان هذا select الباقة، تأكد من تعطيله إذا كان مختار
+          if (selector === 'select[name="package"]' && val) {
+            sel.disabled = true;
+            sel.style.opacity = '0.6';
+            sel.style.cursor = 'not-allowed';
+          }
+          resolve(true); 
+          return; 
+        }
       }
       if (attempts >= retries) { resolve(false); return; }
       setTimeout(trySet, interval);
@@ -1002,6 +1096,23 @@ function setSelectValueWhenReady(selector, val, retries = 12, interval = 200) {
 function showSuccess(message) { const el = document.getElementById('successAlert'); if (!el) return; el.textContent = message; el.className = 'alert alert-success'; el.style.display = 'block'; setTimeout(()=>el.style.display='none',5000); }
 function showError(message) { const el = document.getElementById('errorAlert'); if (!el) return; el.textContent = message; el.className = 'alert alert-error'; el.style.display = 'block'; setTimeout(()=>el.style.display='none',6000); }
 function showLoading(show) { const el = document.getElementById('loading'); if (!el) return; el.style.display = show ? 'block' : 'none'; }
+
+// دالة لضمان أن الباقة المختارة تبقى معطلة
+function ensurePackageSelectDisabled() {
+  const packageSelect = document.querySelector('select[name="package"]');
+  if (!packageSelect) return;
+  
+  const logged = getLoggedPlace();
+  if (logged && logged.raw && logged.raw['الباقة']) {
+    const currentPackage = String(logged.raw['الباقة'] || '').trim();
+    if (currentPackage && packageSelect.value === currentPackage) {
+      packageSelect.disabled = true;
+      packageSelect.style.opacity = '0.6';
+      packageSelect.style.cursor = 'not-allowed';
+      packageSelect.title = 'الباقة مختارة حالياً - غير قابلة للتغيير';
+    }
+  }
+}
 function validateFiles() {
   const maxSize = 10 * 1024 * 1024;
   const allowedImageTypes = ['image/jpeg','image/png','image/gif','image/webp'];
@@ -1341,13 +1452,21 @@ function startPackageStatusCountdown(endDate, countdownEl) {
   
   clearInterval(packageStatusCountdownTimer);
   
+  let lastUpdate = 0;
+  let lastText = '';
+  let lastClass = '';
+  
   function updateCountdown() {
     const now = new Date();
     const diff = endDate.getTime() - now.getTime();
     
     if (diff <= 0) {
-      countdownEl.textContent = 'انتهت';
-      countdownEl.className = 'package-countdown-display countdown-crit';
+      if (lastText !== 'انتهت' || lastClass !== 'package-countdown-display countdown-crit') {
+        countdownEl.textContent = 'انتهت';
+        countdownEl.className = 'package-countdown-display countdown-crit';
+        lastText = 'انتهت';
+        lastClass = 'package-countdown-display countdown-crit';
+      }
       clearInterval(packageStatusCountdownTimer);
       return;
     }
@@ -1372,21 +1491,33 @@ function startPackageStatusCountdown(endDate, countdownEl) {
       countdownText = `متبقي ${minutes} دقيقة`;
     }
     
-    countdownEl.textContent = countdownText;
-    
     // تحديث الألوان حسب الوقت المتبقي
-    countdownEl.className = 'package-countdown-display';
+    let newClass = 'package-countdown-display';
     if (days <= 2) {
-      countdownEl.classList.add('countdown-crit');
+      newClass += ' countdown-crit';
     } else if (days <= 7) {
-      countdownEl.classList.add('countdown-warn');
+      newClass += ' countdown-warn';
     } else {
-      countdownEl.classList.add('countdown-ok');
+      newClass += ' countdown-ok';
+    }
+    
+    // تحديث DOM فقط عند تغيير النص أو الكلاس
+    if (lastText !== countdownText) {
+      countdownEl.textContent = countdownText;
+      lastText = countdownText;
+    }
+    
+    if (lastClass !== newClass) {
+      countdownEl.className = newClass;
+      lastClass = newClass;
     }
   }
   
   updateCountdown();
-  packageStatusCountdownTimer = setInterval(updateCountdown, 60 * 1000); // تحديث كل دقيقة
+  
+  // تحديث كل دقيقة، أو كل 30 ثانية إذا كان الوقت المتبقي أقل من ساعة
+  const updateInterval = (endDate.getTime() - Date.now()) < 60 * 60 * 1000 ? 30 * 1000 : 60 * 1000;
+  packageStatusCountdownTimer = setInterval(updateCountdown, updateInterval);
 }
 
 function showPlaceStatusBar(place) {
@@ -1645,21 +1776,38 @@ function parseDateISO(d) {
     const s = String(d).trim();
     if (!s) return null;
     
+    console.log('parseDateISO input:', s);
+    
+    // محاولة تحليل تنسيق ISO مع الوقت (مثل: 2025-12-11T22:00:00.000Z)
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s)) {
+      console.log('matched ISO format with time');
+      const dt = new Date(s);
+      if (isNaN(dt.getTime())) return null;
+      // تحديد الساعة على نهاية اليوم (23:59:59) للعدّاد
+      dt.setHours(23,59,59,999);
+      console.log('parsed ISO with time:', dt.toISOString());
+      return dt;
+    }
+    
     // محاولة تحليل تنسيق YYYY-MM-DD
-    const parts = s.split('-');
-    if (parts.length === 3) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      console.log('matched YYYY-MM-DD format');
+      const parts = s.split('-');
       const y = Number(parts[0]), m = Number(parts[1]) - 1, day = Number(parts[2]);
       if (isNaN(y) || isNaN(m) || isNaN(day)) return null;
       const dt = new Date(y, m, day);
       if (isNaN(dt.getTime())) return null;
       // تحديد الساعة على نهاية اليوم (23:59:59) للعدّاد
       dt.setHours(23,59,59,999);
+      console.log('parsed YYYY-MM-DD:', dt.toISOString());
       return dt;
     }
     
     // محاولة تحليل تنسيقات أخرى
+    console.log('trying generic Date parsing');
     const dt2 = new Date(s);
     if (isNaN(dt2.getTime())) return null;
+    console.log('parsed generic:', dt2.toISOString());
     return dt2;
   } catch (e) {
     console.warn('parseDateISO error:', e, 'for input:', d);
@@ -1815,9 +1963,20 @@ function testSpecificDate() {
   const testDate = '2025-12-11T22:00:00.000Z';
   console.log('اختبار التاريخ:', testDate);
   
+  // اختبار parseDateISO أولاً
+  console.log('--- اختبار parseDateISO ---');
+  const parsedISO = parseDateISO(testDate);
+  if (parsedISO) {
+    console.log('✓ تم تحليل التاريخ بـ parseDateISO:', parsedISO.toISOString());
+  } else {
+    console.log('✗ فشل تحليل التاريخ بـ parseDateISO');
+  }
+  
+  // اختبار parseSheetDate
+  console.log('--- اختبار parseSheetDate ---');
   const parsed = parseSheetDate(testDate);
   if (parsed) {
-    console.log('✓ تم تحليل التاريخ بنجاح:', parsed.toISOString());
+    console.log('✓ تم تحليل التاريخ بـ parseSheetDate:', parsed.toISOString());
     const now = new Date();
     const diff = parsed.getTime() - now.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -1834,7 +1993,7 @@ function testSpecificDate() {
       console.log('✗ العداد غير موجود');
     }
   } else {
-    console.log('✗ فشل تحليل التاريخ');
+    console.log('✗ فشل تحليل التاريخ بـ parseSheetDate');
   }
 }
 
@@ -2030,7 +2189,7 @@ function forceShowCountdowns() {
     if (endDate) {
       console.log('تاريخ الانتهاء المحلل:', endDate.toISOString());
       
-      // إجبار إظهار العداد الرئيسي
+      // Show only the main/top countdown
       const mainCountdown = document.getElementById('packageStatusCountdown');
       if (mainCountdown) {
         mainCountdown.style.display = 'block';
@@ -2054,54 +2213,14 @@ function forceShowCountdowns() {
         console.error('✗ العداد الرئيسي غير موجود');
       }
       
-      // إجبار إظهار عداد النموذج
+      // Ensure inline/form countdown is hidden
       const formCountdown = document.getElementById('packageInfoCountdown');
       if (formCountdown) {
-        formCountdown.style.display = 'block';
-        formCountdown.style.visibility = 'visible';
-        formCountdown.style.opacity = '1';
-        formCountdown.style.background = 'rgba(255, 255, 255, 0.95)';
-        formCountdown.style.color = '#1f2937';
-        formCountdown.style.padding = '8px 12px';
-        formCountdown.style.borderRadius = '6px';
-        formCountdown.style.fontWeight = '600';
-        formCountdown.style.fontSize = '14px';
-        formCountdown.style.border = '1px solid rgba(0, 0, 0, 0.1)';
-        formCountdown.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.1)';
-        formCountdown.style.zIndex = '100';
-        formCountdown.style.position = 'relative';
-        
-        console.log('بدء عداد النموذج...');
-        const update = () => {
-          const dh = diffDaysHours(new Date(), endDate);
-          const days = dh.days ?? 0;
-          const hours = dh.hours ?? 0;
-          const minutes = Math.floor((dh.ms % (1000 * 60 * 60)) / (1000 * 60));
-          
-          let countdownText = '';
-          if (days > 0) {
-            countdownText = `العدّاد: ${days} يوم`;
-            if (hours > 0) {
-              countdownText += ` و${hours} ساعة`;
-            }
-          } else if (hours > 0) {
-            countdownText = `العدّاد: ${hours} ساعة`;
-            if (minutes > 0) {
-              countdownText += ` و${minutes} دقيقة`;
-            }
-          } else {
-            countdownText = `العدّاد: ${minutes} دقيقة`;
-          }
-          
-          formCountdown.textContent = countdownText;
-          formCountdown.classList.remove('countdown-ok','countdown-warn','countdown-crit');
-          if (dh.ms <= 48*60*60*1000) formCountdown.classList.add('countdown-crit');
-          else if (dh.ms <= 7*24*60*60*1000) formCountdown.classList.add('countdown-warn');
-          else formCountdown.classList.add('countdown-ok');
-        };
-        update();
         clearInterval(formCountdown._timer);
-        formCountdown._timer = setInterval(update, 60 * 1000);
+        formCountdown._timer = null;
+        formCountdown.textContent = '';
+        formCountdown.className = 'package-countdown';
+        formCountdown.style.display = 'none';
       }
     } else {
       console.log('✗ لا يمكن تحليل تاريخ الانتهاء');
@@ -2151,19 +2270,31 @@ async function forceRefreshPlaceData(showLoading = true) {
   try {
     const fetched = await fetchPlace(logged.id);
     if (fetched) {
-      await setLoggedInUI(fetched);
+      // استخدام skipRefresh=true لمنع الحلقة اللانهائية
+      await setLoggedInUI(fetched, true);
+      consecutiveFailures = 0; // إعادة تعيين عداد الأخطاء عند النجاح
+      lastSuccessfulRefresh = Date.now();
+      
+      // ضمان أن الباقة المختارة تبقى معطلة بعد التحديث
+      ensurePackageSelectDisabled();
+      
       if (showLoading) {
         showSuccess('تم تحديث البيانات من الخادم');
       }
     } else {
+      consecutiveFailures++;
       if (showLoading) {
         showError('فشل في تحديث البيانات من الخادم');
       }
+      throw new Error('Failed to fetch place data');
     }
   } catch (err) {
+    consecutiveFailures++;
+    console.error('Error refreshing place data:', err);
     if (showLoading) {
       showError('خطأ في تحديث البيانات: ' + err.message);
     }
+    throw err; // إعادة رمي الخطأ للتعامل معه في startAutoRefresh
   } finally {
     if (showLoading) {
       showPackageLoading(false);
@@ -2180,6 +2311,12 @@ function showPackageLoading(show) {
   if (loading2) loading2.style.display = show ? 'block' : 'none';
 }
 
+// متغيرات لإدارة حالة الشبكة
+let consecutiveFailures = 0;
+let lastSuccessfulRefresh = Date.now();
+const MAX_CONSECUTIVE_FAILURES = 5;
+const MIN_REFRESH_INTERVAL = 30000; // 30 ثانية كحد أدنى
+
 // دالة لبدء التحديث التلقائي
 function startAutoRefresh() {
   if (autoRefreshInterval) {
@@ -2188,8 +2325,26 @@ function startAutoRefresh() {
   
   autoRefreshInterval = setInterval(async () => {
     const logged = getLoggedPlace();
-    if (logged && logged.id) {
+    if (!logged || !logged.id) return;
+    
+    // تحقق من عدد المحاولات الفاشلة المتتالية
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      const timeSinceLastSuccess = Date.now() - lastSuccessfulRefresh;
+      if (timeSinceLastSuccess < MIN_REFRESH_INTERVAL) {
+        console.log('Skipping refresh due to consecutive failures');
+        return;
+      }
+      // إعادة تعيين العداد بعد فترة من الزمن
+      consecutiveFailures = 0;
+    }
+    
+    try {
       await forceRefreshPlaceData(false); // تحديث صامت
+      consecutiveFailures = 0; // إعادة تعيين العداد عند النجاح
+      lastSuccessfulRefresh = Date.now();
+    } catch (err) {
+      consecutiveFailures++;
+      console.warn(`Auto refresh failed (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`, err.message);
     }
   }, AUTO_REFRESH_INTERVAL);
 }
@@ -2201,6 +2356,23 @@ function stopAutoRefresh() {
     autoRefreshInterval = null;
   }
 }
+
+// دالة لتنظيف جميع المؤقتات
+function cleanupAllTimers() {
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = null;
+  }
+  if (packageStatusCountdownTimer) {
+    clearInterval(packageStatusCountdownTimer);
+    packageStatusCountdownTimer = null;
+  }
+  // إضافة أي مؤقتات أخرى هنا
+}
+
+// تنظيف المؤقتات عند إغلاق الصفحة
+window.addEventListener('beforeunload', cleanupAllTimers);
+window.addEventListener('unload', cleanupAllTimers);
 
 // دالة لفحص البيانات المحفوظة محلياً
 function debugStoredData() {
@@ -2242,6 +2414,7 @@ async function refreshPackageUIFromDashboard() {
     const hint = document.getElementById('activateHint');
     const btn = document.getElementById('activatePackageBtn');
 
+    // عناصر بطاقات المعلومات داخل التبويبات (سيتم إخفاؤها دائماً)
     const card = document.getElementById('currentPackageCard');
     const cardText = document.getElementById('currentPackageText');
     const cardCountdown = document.getElementById('currentPackageCountdown');
@@ -2250,10 +2423,11 @@ async function refreshPackageUIFromDashboard() {
     const inlineText = document.getElementById('packageInfoText');
     const inlineCountdown = document.getElementById('packageInfoCountdown');
 
+    // تنظيف أولي وإخفاء البطاقات والعدادات بشكل دائم
     if (hint) hint.classList.remove('active','pending','expired');
-    [card, inlineCard].forEach(c => { if (c) c.style.display = 'none'; });
-    [cardText, inlineText].forEach(t => { if (t) t.textContent = ''; });
-    [cardCountdown, inlineCountdown].forEach(cd => { if (cd) { cd.textContent = ''; cd.className = 'package-countdown'; clearInterval(cd && cd._timer); } });
+    ;[card, inlineCard].forEach(c => { if (c) c.style.display = 'none'; });
+    ;[cardText, inlineText].forEach(t => { if (t) t.textContent = ''; });
+    ;[cardCountdown, inlineCountdown].forEach(cd => { if (cd) { clearInterval(cd._timer); cd._timer = null; cd.textContent = ''; cd.className = 'package-countdown'; cd.style.display = 'none'; } });
 
     if (!logged || !logged.id) {
       if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
@@ -2267,100 +2441,33 @@ async function refreshPackageUIFromDashboard() {
     if (!place || !place.raw) return;
 
     const pkgStatus = String(place.raw['حالة الباقة'] || place.raw['packageStatus'] || '').trim();
-    const pkgId = String(place.raw['الباقة'] || place.package || '').trim();
     const startRaw = place.raw['تاريخ بداية الاشتراك'] || place.packageStart || '';
     const endRaw = place.raw['تاريخ نهاية الاشتراك'] || place.packageEnd || '';
     const startDate = parseDateISO(startRaw);
     const endDate = parseDateISO(endRaw);
-    const today = new Date();
 
-    // اسم الباقة من lookups إن توفر
-    let packageName = '';
-    try {
-      if (window.lastLookups && Array.isArray(lastLookups.packages)) {
-        const f = lastLookups.packages.find(p => String(p.id) === pkgId);
-        if (f) packageName = f.name;
-      }
-    } catch {}
-
-    let remaining = (startDate && endDate) ? daysBetween(today, endDate) : null;
-    if (remaining !== null && remaining < 0) remaining = 0;
-
-    function setCountdown(el, end) {
-      if (!el || !end) return;
-      const update = () => {
-        const dh = diffDaysHours(new Date(), end);
-        const days = dh.days ?? 0;
-        const hours = dh.hours ?? 0;
-        const minutes = Math.floor((dh.ms % (1000 * 60 * 60)) / (1000 * 60));
-        
-        // عرض العدّاد بتنسيق أفضل
-        let countdownText = '';
-        if (days > 0) {
-          countdownText = `العدّاد: ${days} يوم`;
-          if (hours > 0) {
-            countdownText += ` و${hours} ساعة`;
-          }
-        } else if (hours > 0) {
-          countdownText = `العدّاد: ${hours} ساعة`;
-          if (minutes > 0) {
-            countdownText += ` و${minutes} دقيقة`;
-          }
-        } else {
-          countdownText = `العدّاد: ${minutes} دقيقة`;
-        }
-        
-        el.textContent = countdownText;
-        el.classList.remove('countdown-ok','countdown-warn','countdown-crit');
-        if (dh.ms <= 48*60*60*1000) el.classList.add('countdown-crit');
-        else if (dh.ms <= 7*24*60*60*1000) el.classList.add('countdown-warn');
-        else el.classList.add('countdown-ok');
-      };
-      update();
-      clearInterval(el._timer);
-      el._timer = setInterval(update, 60 * 1000);
-    }
-
-    // عرض حسب الحالة
+    // تحديث حالة الزر والتنبيه فقط، مع عدم إظهار أي معلومات تفصيلية عن الباقة هنا
     if (!pkgStatus) {
       clearPackageCountdown();
-      if (hint) hint.textContent = 'حالة الباقة: لا يوجد اشتراك';
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'تفعيل الاشتراك'; }
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      if (cardText) cardText.textContent = 'باقتك الحالية: لا يوجد اشتراك';
-      if (inlineText) inlineText.textContent = 'باقتك الحالية: لا يوجد اشتراك';
+      if (hint) hint.textContent = 'حالة الباقة: لا يوجد اشتراك';
       return;
     }
 
     if (pkgStatus === 'مفعلة') {
       if (btn) { btn.disabled = true; btn.style.opacity = '0.8'; btn.textContent = 'الاشتراك مُفعّل'; }
-      let msg = 'حالة الباقة: مفعلة';
-      if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-        const sTxt = startDate.toISOString().split('T')[0];
-        const eTxt = endDate.toISOString().split('T')[0];
-        msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}${remaining !== null ? ` · المتبقي: ${remaining} يوم` : ''}`;
+      if (hint) {
+        let msg = 'حالة الباقة: مفعلة';
+        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+          const sTxt = startDate.toISOString().split('T')[0];
+          const eTxt = endDate.toISOString().split('T')[0];
+          msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+        }
+        hint.textContent = msg;
+        hint.classList.add('active');
       }
-      if (hint) { hint.textContent = msg; hint.classList.add('active'); }
-
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      const remTxt = remaining !== null ? ` — المتبقي ${remaining} يوم` : '';
-      if (cardText) cardText.textContent = `باقتك الحالية: ${pn}${eTxt ? ` — تنتهي في ${eTxt}` : ''}${remTxt}`;
-      if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn}${eTxt ? ` — تنتهي في ${eTxt}` : ''}${remTxt}`;
-
-      if (endDate) {
-        // عرض العدّاد في بطاقة تبويب الباقات
-        if (cardCountdown) setCountdown(cardCountdown, endDate);
-        // عدّاد نصي بجانب الزر القديم
-        const daysLeft = daysBetween(today, endDate);
-        if (daysLeft !== null && daysLeft <= 30) startPackageCountdown(endDate); else clearPackageCountdown();
-        // عدّاد بطاقة النموذج
-        if (inlineCountdown) setCountdown(inlineCountdown, endDate);
-      }
+      // لا نظهر أي عدادات/بطاقات هنا
+      clearPackageCountdown();
       return;
     }
 
@@ -2368,31 +2475,22 @@ async function refreshPackageUIFromDashboard() {
       clearPackageCountdown();
       if (btn) { btn.disabled = true; btn.style.opacity = '0.8'; btn.textContent = 'قيد التحقق من الدفع'; }
       if (hint) { hint.textContent = 'سيتم التأكد من عملية الدفع و التفعيل خلال لحظات'; hint.classList.add('pending'); }
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      if (cardText) cardText.textContent = `باقتك الحالية: ${pn} — الحالة: قيد الدفع`;
-      if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn} — الحالة: قيد الدفع`;
       return;
     }
 
     if (pkgStatus === 'منتهية') {
       clearPackageCountdown();
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'تجديد الاشتراك'; }
-      let msg = 'حالة الباقة: منتهية';
-      if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-        const sTxt = startDate.toISOString().split('T')[0];
-        const eTxt = endDate.toISOString().split('T')[0];
-        msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+      if (hint) {
+        let msg = 'حالة الباقة: منتهية';
+        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+          const sTxt = startDate.toISOString().split('T')[0];
+          const eTxt = endDate.toISOString().split('T')[0];
+          msg += ` — البداية: ${sTxt} · النهاية: ${eTxt}`;
+        }
+        hint.textContent = msg;
+        hint.classList.add('expired');
       }
-      if (hint) { hint.textContent = msg; hint.classList.add('expired'); }
-      [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      if (cardText) cardText.textContent = `باقتك الحالية: ${pn} — الحالة: منتهية${eTxt ? ` — انتهت في ${eTxt}` : ''}`;
-      if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn} — الحالة: منتهية${eTxt ? ` — انتهت في ${eTxt}` : ''}`;
       return;
     }
 
@@ -2400,10 +2498,6 @@ async function refreshPackageUIFromDashboard() {
     clearPackageCountdown();
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = (pkgStatus.indexOf('منته') !== -1) ? 'تجديد الاشتراك' : 'تفعيل الاشتراك'; }
     if (hint) hint.textContent = `حالة الباقة: ${pkgStatus}`;
-    [card, inlineCard].forEach(c => { if (c) c.style.display = 'block'; });
-    const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-    if (cardText) cardText.textContent = `باقتك الحالية: ${pn} — الحالة: ${pkgStatus}`;
-    if (inlineText) inlineText.textContent = `باقتك الحالية: ${pn} — الحالة: ${pkgStatus}`;
   } catch (e) {
     console.warn('refreshPackageUIFromDashboard error', e);
   }
@@ -2526,108 +2620,184 @@ function updateInlinePackageInfoCard(place) {
     const card = document.getElementById('packageInfoCard');
     const text = document.getElementById('packageInfoText');
     const countdown = document.getElementById('packageInfoCountdown');
-    if (!card || !text || !countdown) return;
-    card.style.display = 'none'; text.textContent = ''; countdown.textContent = ''; countdown.className = 'package-countdown'; clearInterval(countdown._timer);
-
-    const raw = place.raw || {};
-    const pkgStatus = String(raw['حالة الباقة'] || '').trim();
-    const pkgId = String(raw['الباقة'] || '').trim();
-    const startRaw = raw['تاريخ بداية الاشتراك'] || '';
-    const endRaw = raw['تاريخ نهاية الاشتراك'] || '';
-    const startDate = parseDateISO(startRaw);
-    const endDate = parseDateISO(endRaw);
-
-    // رسائل تتبع للتصحيح (يمكن إزالتها لاحقاً)
-    if (pkgStatus === 'قيد الدفع') {
-      console.log('Package status shows "قيد الدفع" - checking for data sync...');
-    }
-
-    let packageName = '';
-    try {
-      if (window.lastLookups && Array.isArray(lastLookups.packages)) {
-        const f = lastLookups.packages.find(p => String(p.id) === pkgId);
-        if (f) packageName = f.name;
-      }
-    } catch {}
-
-    if (!pkgStatus) {
-      card.style.display = 'block';
-      text.textContent = 'باقتك الحالية: لا يوجد اشتراك';
-      return;
-    }
-
-    if (pkgStatus === 'مفعلة') {
-      const today = new Date();
-      let remaining = (startDate && endDate) ? daysBetween(today, endDate) : null;
-      if (remaining !== null && remaining < 0) remaining = 0;
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      text.textContent = `باقتك الحالية: ${pn}${eTxt ? ` — تنتهي في ${eTxt}` : ''}${remaining !== null ? ` — المتبقي ${remaining} يوم` : ''}`;
-      card.style.display = 'block';
-
-      if (endDate) {
-        const update = () => {
-          const dh = diffDaysHours(new Date(), endDate);
-          const days = dh.days ?? 0;
-          const hours = dh.hours ?? 0;
-          const minutes = Math.floor((dh.ms % (1000 * 60 * 60)) / (1000 * 60));
-          
-          // عرض العدّاد بتنسيق أفضل
-          let countdownText = '';
-          if (days > 0) {
-            countdownText = `العدّاد: ${days} يوم`;
-            if (hours > 0) {
-              countdownText += ` و${hours} ساعة`;
-            }
-          } else if (hours > 0) {
-            countdownText = `العدّاد: ${hours} ساعة`;
-            if (minutes > 0) {
-              countdownText += ` و${minutes} دقيقة`;
-            }
-          } else {
-            countdownText = `العدّاد: ${minutes} دقيقة`;
-          }
-          
-          countdown.textContent = countdownText;
-          countdown.classList.remove('countdown-ok','countdown-warn','countdown-crit');
-          if (dh.ms <= 48*60*60*1000) countdown.classList.add('countdown-crit');
-          else if (dh.ms <= 7*24*60*60*1000) countdown.classList.add('countdown-warn');
-          else countdown.classList.add('countdown-ok');
-        };
-        update();
-        clearInterval(countdown._timer);
-        countdown._timer = setInterval(update, 60 * 1000);
-      }
-      return;
-    }
-
-    if (pkgStatus === 'قيد الدفع') {
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      text.textContent = `باقتك الحالية: ${pn} — الحالة: قيد الدفع`;
-      card.style.display = 'block';
-      return;
-    }
-
-    if (pkgStatus === 'منتهية') {
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      text.textContent = `باقتك الحالية: ${pn} — الحالة: منتهية${eTxt ? ` — انتهت في ${eTxt}` : ''}`;
-      card.style.display = 'block';
-      return;
-    }
-
-    // حالات أخرى
-    const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-    text.textContent = `باقتك الحالية: ${pn} — الحالة: ${pkgStatus}`;
-    card.style.display = 'block';
+    // Hide and disable inline package info completely
+    if (countdown) { clearInterval(countdown._timer); countdown._timer = null; countdown.textContent = ''; countdown.className = 'package-countdown'; countdown.style.display = 'none'; }
+    if (text) { text.textContent = ''; }
+    if (card) { card.style.display = 'none'; }
+    return;
   } catch (e) {
     console.warn('updateInlinePackageInfoCard error', e);
+  }
+}
+
+// أدوات مساعدة لحقل ساعات العمل: جعله اختياري وسريع التعبئة
+function enhanceWorkingHoursInput() {
+  try {
+    const input = document.querySelector('input[name="workingHours"]');
+    if (!input) return;
+
+    // لا تكرر الأدوات إذا كانت مضافة
+    if (input._whEnhanced) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.style.marginTop = '6px';
+    wrapper.style.display = 'flex';
+    wrapper.style.gap = '6px';
+    wrapper.style.flexWrap = 'wrap';
+
+    const makeBtn = (label) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.className = 'btn btn-small'; b.style.padding = '4px 8px'; b.style.borderRadius='6px'; b.style.border='1px solid #ddd'; b.style.background='#f9fafb'; b.style.cursor='pointer'; return b; };
+
+    const btn24 = makeBtn('مفتوح 24 ساعة');
+    btn24.addEventListener('click', () => { input.value = 'مفتوح 24 ساعة'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+
+    const btnDefault = makeBtn('ساعات افتراضية');
+    btnDefault.title = '9:00 ص - 11:00 م';
+    btnDefault.addEventListener('click', () => { input.value = '9:00 ص - 11:00 م'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+
+    const btnClear = makeBtn('بدون ساعات');
+    btnClear.addEventListener('click', () => { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); });
+
+    wrapper.appendChild(btn24);
+    wrapper.appendChild(btnDefault);
+    wrapper.appendChild(btnClear);
+
+    // ضع الأدوات بعد الحقل مباشرة
+    if (input.parentElement) {
+      input.parentElement.appendChild(wrapper);
+      input._whEnhanced = true;
+    }
+  } catch (e) { console.warn('enhanceWorkingHoursInput error', e); }
+}
+
+/* Auto fill WhatsApp link from phone */
+function setupWhatsappAutoFill() {
+  try {
+    const phoneInput = document.querySelector('input[name="phone"]');
+    const waInput = document.querySelector('input[name="whatsappLink"]');
+    if (!phoneInput || !waInput) return;
+
+    const buildWaLink = (raw) => {
+      if (!raw) return '';
+      let s = String(raw).trim();
+      // إن وُجد + حوّلها لأرقام فقط بدون +
+      s = s.replace(/\+/g, '');
+      // أزل أي محارف غير الأرقام
+      s = s.replace(/\D/g, '');
+      // إذا بدأ بـ 00 حولها إلى إزالة الـ 00 (واستعمال الباقي)
+      if (s.startsWith('00')) s = s.slice(2);
+      // إذا لا يوجد طول كافٍ، لا تنشئ رابطاً
+      if (s.length < 8) return '';
+      return `https://wa.me/${s}`;
+    };
+
+    const maybeFill = () => {
+      const phoneVal = phoneInput.value || '';
+      const currentWa = waInput.value || '';
+      const auto = buildWaLink(phoneVal);
+      // لا نكتب فوق إدخال المستخدم اليدوي (إن قام بتغييره)
+      if (!currentWa || waInput._autoFilled) {
+        if (auto) {
+          waInput.value = auto;
+          waInput._autoFilled = true;
+        }
+      }
+    };
+
+    // املأ مبدئياً إن أمكن
+    maybeFill();
+
+    // حدث عند تغيير الهاتف
+    phoneInput.removeEventListener('_wa_input_change', phoneInput._waHandler || (()=>{}));
+    const handler = () => maybeFill();
+    phoneInput.addEventListener('input', handler);
+    phoneInput.addEventListener('blur', handler);
+    phoneInput._waHandler = handler;
+
+    // إذا المستخدم غيّر رابط الواتساب يدوياً، توقف عن الكتابة عليه
+    waInput.removeEventListener('_wa_user_edit', waInput._waUserHandler || (()=>{}));
+    const userHandler = () => { waInput._autoFilled = false; };
+    waInput.addEventListener('input', userHandler);
+    waInput._waUserHandler = userHandler;
+  } catch (e) { console.warn('setupWhatsappAutoFill error', e); }
+}
+
+/* ========== Skeleton loading helpers ========== */
+function ensureSkeletonStyles() {
+  if (document.getElementById('skeletonStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'skeletonStyles';
+  style.textContent = `
+    .skel { position: relative; overflow: hidden; background: #eee; border-radius: 8px; }
+    .skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.6) 50%, rgba(255,255,255,0) 100%); animation: skel 1.2s infinite; }
+    @keyframes skel { 100% { transform: translateX(100%); } }
+    .skeleton-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #eee; border-radius: 10px; background: #fafafa; }
+    .skel-line { height: 12px; }
+    .skel-h { height: 18px; }
+    .skel-btn { height: 36px; }
+    .skel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  `;
+  document.head.appendChild(style);
+}
+function renderPackagesSkeleton() {
+  ensureSkeletonStyles();
+  const grid = document.getElementById('packagesGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'skel-grid';
+  const count = 6;
+  for (let i = 0; i < count; i++) {
+    const card = document.createElement('div'); card.className = 'skeleton-card';
+    const h = document.createElement('div'); h.className = 'skel skel-h';
+    const l1 = document.createElement('div'); l1.className = 'skel skel-line';
+    const l2 = document.createElement('div'); l2.className = 'skel skel-line';
+    const btn = document.createElement('div'); btn.className = 'skel skel-btn';
+    card.appendChild(h); card.appendChild(l1); card.appendChild(l2); card.appendChild(btn);
+    wrap.appendChild(card);
+  }
+  grid.appendChild(wrap);
+}
+function showLoadingSkeleton() {
+  // Disable selects with loading option
+  const actSelect = document.querySelector('select[name="activityType"]');
+  const citySelect = document.querySelector('select[name="city"]');
+  const areaSelect = document.querySelector('select[name="area"]');
+  const locSelects = document.querySelectorAll('select[name="location"]');
+  const pkgSelect = document.querySelector('select[name="package"]');
+  const setLoading = (sel) => { if (!sel) return; sel.innerHTML = '<option value="">جارِ التحميل...</option>'; sel.disabled = true; };
+  setLoading(actSelect);
+  setLoading(citySelect);
+  setLoading(areaSelect);
+  locSelects.forEach(setLoading);
+  setLoading(pkgSelect);
+  // Packages skeleton
+  renderPackagesSkeleton();
+}
+function hideLoadingSkeleton() {
+  // Re-enable selects (actual options will be filled by loaders)
+  const selects = document.querySelectorAll('select[name="activityType"], select[name="city"], select[name="area"], select[name="location"], select[name="package"]');
+  selects.forEach(s => { if (s) s.disabled = false; });
+  // Clear skeleton grid wrapper if exists (packagesGrid will be rebuilt by loader)
+  const grid = document.getElementById('packagesGrid');
+  if (grid) {
+    // leave clearing to loader; just ensure not to accumulate skeletons
+    const skelWraps = grid.querySelectorAll('.skel-grid');
+    skelWraps.forEach(w => w.remove());
+  }
+}
+
+/* ========== Package Cards Interaction Lock ========== */
+function setPackagesInteractionEnabled(enabled) {
+  const grid = document.getElementById('packagesGrid');
+  if (!grid) return;
+  if (enabled) {
+    grid.classList.remove('packages-loading');
+    grid.style.pointerEvents = '';
+    grid.style.opacity = '';
+  } else {
+    grid.classList.add('packages-loading');
+    grid.style.pointerEvents = 'none';
+    grid.style.opacity = '0.7';
   }
 }
 
