@@ -1688,21 +1688,38 @@ function parseDateISO(d) {
     const s = String(d).trim();
     if (!s) return null;
     
+    console.log('parseDateISO input:', s);
+    
+    // محاولة تحليل تنسيق ISO مع الوقت (مثل: 2025-12-11T22:00:00.000Z)
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s)) {
+      console.log('matched ISO format with time');
+      const dt = new Date(s);
+      if (isNaN(dt.getTime())) return null;
+      // تحديد الساعة على نهاية اليوم (23:59:59) للعدّاد
+      dt.setHours(23,59,59,999);
+      console.log('parsed ISO with time:', dt.toISOString());
+      return dt;
+    }
+    
     // محاولة تحليل تنسيق YYYY-MM-DD
-    const parts = s.split('-');
-    if (parts.length === 3) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      console.log('matched YYYY-MM-DD format');
+      const parts = s.split('-');
       const y = Number(parts[0]), m = Number(parts[1]) - 1, day = Number(parts[2]);
       if (isNaN(y) || isNaN(m) || isNaN(day)) return null;
       const dt = new Date(y, m, day);
       if (isNaN(dt.getTime())) return null;
       // تحديد الساعة على نهاية اليوم (23:59:59) للعدّاد
       dt.setHours(23,59,59,999);
+      console.log('parsed YYYY-MM-DD:', dt.toISOString());
       return dt;
     }
     
     // محاولة تحليل تنسيقات أخرى
+    console.log('trying generic Date parsing');
     const dt2 = new Date(s);
     if (isNaN(dt2.getTime())) return null;
+    console.log('parsed generic:', dt2.toISOString());
     return dt2;
   } catch (e) {
     console.warn('parseDateISO error:', e, 'for input:', d);
@@ -1858,9 +1875,20 @@ function testSpecificDate() {
   const testDate = '2025-12-11T22:00:00.000Z';
   console.log('اختبار التاريخ:', testDate);
   
+  // اختبار parseDateISO أولاً
+  console.log('--- اختبار parseDateISO ---');
+  const parsedISO = parseDateISO(testDate);
+  if (parsedISO) {
+    console.log('✓ تم تحليل التاريخ بـ parseDateISO:', parsedISO.toISOString());
+  } else {
+    console.log('✗ فشل تحليل التاريخ بـ parseDateISO');
+  }
+  
+  // اختبار parseSheetDate
+  console.log('--- اختبار parseSheetDate ---');
   const parsed = parseSheetDate(testDate);
   if (parsed) {
-    console.log('✓ تم تحليل التاريخ بنجاح:', parsed.toISOString());
+    console.log('✓ تم تحليل التاريخ بـ parseSheetDate:', parsed.toISOString());
     const now = new Date();
     const diff = parsed.getTime() - now.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -1877,7 +1905,7 @@ function testSpecificDate() {
       console.log('✗ العداد غير موجود');
     }
   } else {
-    console.log('✗ فشل تحليل التاريخ');
+    console.log('✗ فشل تحليل التاريخ بـ parseSheetDate');
   }
 }
 
