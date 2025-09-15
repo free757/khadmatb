@@ -934,6 +934,9 @@ async function setLoggedInUI(place, skipRefresh = false) {
     showPackageStatusBar(place);
   } catch (e) { console.warn('could not show status bar', e); }
   updateActivateButtonState();
+  
+  // ضمان أن الباقة المختارة تبقى معطلة
+  ensurePackageSelectDisabled();
 
   // تحديث تلقائي للبيانات بعد 2 ثانية من تسجيل الدخول (فقط عند تسجيل الدخول الأولي)
   if (!skipRefresh) {
@@ -954,6 +957,16 @@ function setLoggedOutUI() {
   hidePackageStatusBar();
   const tabAds = document.getElementById('tab-ads'); if (tabAds) tabAds.style.display = 'none';
   const placeSelects = document.querySelectorAll('select[name="placeId"]'); placeSelects.forEach(ps => { ps.disabled = false; });
+  
+  // تمكين select الباقة مرة أخرى عند تسجيل الخروج
+  const packageSelect = document.querySelector('select[name="package"]');
+  if (packageSelect) {
+    packageSelect.disabled = false;
+    packageSelect.style.opacity = '1';
+    packageSelect.style.cursor = 'default';
+    packageSelect.title = '';
+  }
+  
   if (typeof updateAdsTabVisibility === 'function') updateAdsTabVisibility();
   updateActivateButtonState();
   
@@ -990,6 +1003,9 @@ async function tryPrefillPlaceForm(place) {
 
     // تحدّيث بطاقة معلومات الباقة في نموذج المكان
     updateInlinePackageInfoCard(place);
+    
+    // ضمان أن الباقة المختارة تبقى معطلة
+    ensurePackageSelectDisabled();
   } catch (e) { console.warn('tryPrefillPlaceForm failed', e); }
 }
 
@@ -1012,7 +1028,16 @@ function setSelectValueWhenReady(selector, val, retries = 12, interval = 200) {
       const sel = (typeof selector === 'string') ? document.querySelector(selector) : selector;
       if (sel) {
         const ok = setSelectByValueOrText(sel, val);
-        if (ok) { resolve(true); return; }
+        if (ok) { 
+          // إذا كان هذا select الباقة، تأكد من تعطيله إذا كان مختار
+          if (selector === 'select[name="package"]' && val) {
+            sel.disabled = true;
+            sel.style.opacity = '0.6';
+            sel.style.cursor = 'not-allowed';
+          }
+          resolve(true); 
+          return; 
+        }
       }
       if (attempts >= retries) { resolve(false); return; }
       setTimeout(trySet, interval);
@@ -1025,6 +1050,23 @@ function setSelectValueWhenReady(selector, val, retries = 12, interval = 200) {
 function showSuccess(message) { const el = document.getElementById('successAlert'); if (!el) return; el.textContent = message; el.className = 'alert alert-success'; el.style.display = 'block'; setTimeout(()=>el.style.display='none',5000); }
 function showError(message) { const el = document.getElementById('errorAlert'); if (!el) return; el.textContent = message; el.className = 'alert alert-error'; el.style.display = 'block'; setTimeout(()=>el.style.display='none',6000); }
 function showLoading(show) { const el = document.getElementById('loading'); if (!el) return; el.style.display = show ? 'block' : 'none'; }
+
+// دالة لضمان أن الباقة المختارة تبقى معطلة
+function ensurePackageSelectDisabled() {
+  const packageSelect = document.querySelector('select[name="package"]');
+  if (!packageSelect) return;
+  
+  const logged = getLoggedPlace();
+  if (logged && logged.raw && logged.raw['الباقة']) {
+    const currentPackage = String(logged.raw['الباقة'] || '').trim();
+    if (currentPackage && packageSelect.value === currentPackage) {
+      packageSelect.disabled = true;
+      packageSelect.style.opacity = '0.6';
+      packageSelect.style.cursor = 'not-allowed';
+      packageSelect.title = 'الباقة مختارة حالياً - غير قابلة للتغيير';
+    }
+  }
+}
 function validateFiles() {
   const maxSize = 10 * 1024 * 1024;
   const allowedImageTypes = ['image/jpeg','image/png','image/gif','image/webp'];
@@ -2226,6 +2268,10 @@ async function forceRefreshPlaceData(showLoading = true) {
       await setLoggedInUI(fetched, true);
       consecutiveFailures = 0; // إعادة تعيين عداد الأخطاء عند النجاح
       lastSuccessfulRefresh = Date.now();
+      
+      // ضمان أن الباقة المختارة تبقى معطلة بعد التحديث
+      ensurePackageSelectDisabled();
+      
       if (showLoading) {
         showSuccess('تم تحديث البيانات من الخادم');
       }
