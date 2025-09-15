@@ -2143,7 +2143,7 @@ function forceShowCountdowns() {
     if (endDate) {
       console.log('تاريخ الانتهاء المحلل:', endDate.toISOString());
       
-      // إجبار إظهار العداد الرئيسي
+      // Show only the main/top countdown
       const mainCountdown = document.getElementById('packageStatusCountdown');
       if (mainCountdown) {
         mainCountdown.style.display = 'block';
@@ -2167,54 +2167,14 @@ function forceShowCountdowns() {
         console.error('✗ العداد الرئيسي غير موجود');
       }
       
-      // إجبار إظهار عداد النموذج
+      // Ensure inline/form countdown is hidden
       const formCountdown = document.getElementById('packageInfoCountdown');
       if (formCountdown) {
-        formCountdown.style.display = 'block';
-        formCountdown.style.visibility = 'visible';
-        formCountdown.style.opacity = '1';
-        formCountdown.style.background = 'rgba(255, 255, 255, 0.95)';
-        formCountdown.style.color = '#1f2937';
-        formCountdown.style.padding = '8px 12px';
-        formCountdown.style.borderRadius = '6px';
-        formCountdown.style.fontWeight = '600';
-        formCountdown.style.fontSize = '14px';
-        formCountdown.style.border = '1px solid rgba(0, 0, 0, 0.1)';
-        formCountdown.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.1)';
-        formCountdown.style.zIndex = '100';
-        formCountdown.style.position = 'relative';
-        
-        console.log('بدء عداد النموذج...');
-        const update = () => {
-          const dh = diffDaysHours(new Date(), endDate);
-          const days = dh.days ?? 0;
-          const hours = dh.hours ?? 0;
-          const minutes = Math.floor((dh.ms % (1000 * 60 * 60)) / (1000 * 60));
-          
-          let countdownText = '';
-          if (days > 0) {
-            countdownText = `العدّاد: ${days} يوم`;
-            if (hours > 0) {
-              countdownText += ` و${hours} ساعة`;
-            }
-          } else if (hours > 0) {
-            countdownText = `العدّاد: ${hours} ساعة`;
-            if (minutes > 0) {
-              countdownText += ` و${minutes} دقيقة`;
-            }
-          } else {
-            countdownText = `العدّاد: ${minutes} دقيقة`;
-          }
-          
-          formCountdown.textContent = countdownText;
-          formCountdown.classList.remove('countdown-ok','countdown-warn','countdown-crit');
-          if (dh.ms <= 48*60*60*1000) formCountdown.classList.add('countdown-crit');
-          else if (dh.ms <= 7*24*60*60*1000) formCountdown.classList.add('countdown-warn');
-          else formCountdown.classList.add('countdown-ok');
-        };
-        update();
         clearInterval(formCountdown._timer);
-        formCountdown._timer = setInterval(update, 60 * 1000);
+        formCountdown._timer = null;
+        formCountdown.textContent = '';
+        formCountdown.className = 'package-countdown';
+        formCountdown.style.display = 'none';
       }
     } else {
       console.log('✗ لا يمكن تحليل تاريخ الانتهاء');
@@ -2692,106 +2652,11 @@ function updateInlinePackageInfoCard(place) {
     const card = document.getElementById('packageInfoCard');
     const text = document.getElementById('packageInfoText');
     const countdown = document.getElementById('packageInfoCountdown');
-    if (!card || !text || !countdown) return;
-    card.style.display = 'none'; text.textContent = ''; countdown.textContent = ''; countdown.className = 'package-countdown'; clearInterval(countdown._timer);
-
-    const raw = place.raw || {};
-    const pkgStatus = String(raw['حالة الباقة'] || '').trim();
-    const pkgId = String(raw['الباقة'] || '').trim();
-    const startRaw = raw['تاريخ بداية الاشتراك'] || '';
-    const endRaw = raw['تاريخ نهاية الاشتراك'] || '';
-    const startDate = parseDateISO(startRaw);
-    const endDate = parseDateISO(endRaw);
-
-    // رسائل تتبع للتصحيح (يمكن إزالتها لاحقاً)
-    if (pkgStatus === 'قيد الدفع') {
-      console.log('Package status shows "قيد الدفع" - checking for data sync...');
-    }
-
-    let packageName = '';
-    try {
-      if (window.lastLookups && Array.isArray(lastLookups.packages)) {
-        const f = lastLookups.packages.find(p => String(p.id) === pkgId);
-        if (f) packageName = f.name;
-      }
-    } catch {}
-
-    if (!pkgStatus) {
-      card.style.display = 'block';
-      text.textContent = 'باقتك الحالية: لا يوجد اشتراك';
-      return;
-    }
-
-    if (pkgStatus === 'مفعلة') {
-      const today = new Date();
-      let remaining = (startDate && endDate) ? daysBetween(today, endDate) : null;
-      if (remaining !== null && remaining < 0) remaining = 0;
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      text.textContent = `باقتك الحالية: ${pn}${eTxt ? ` — تنتهي في ${eTxt}` : ''}${remaining !== null ? ` — المتبقي ${remaining} يوم` : ''}`;
-      card.style.display = 'block';
-
-      if (endDate) {
-        const update = () => {
-          const dh = diffDaysHours(new Date(), endDate);
-          const days = dh.days ?? 0;
-          const hours = dh.hours ?? 0;
-          const minutes = Math.floor((dh.ms % (1000 * 60 * 60)) / (1000 * 60));
-          
-          // عرض العدّاد بتنسيق أفضل
-          let countdownText = '';
-          if (days > 0) {
-            countdownText = `العدّاد: ${days} يوم`;
-            if (hours > 0) {
-              countdownText += ` و${hours} ساعة`;
-            }
-          } else if (hours > 0) {
-            countdownText = `العدّاد: ${hours} ساعة`;
-            if (minutes > 0) {
-              countdownText += ` و${minutes} دقيقة`;
-            }
-          } else {
-            countdownText = `العدّاد: ${minutes} دقيقة`;
-          }
-          
-          countdown.textContent = countdownText;
-          countdown.classList.remove('countdown-ok','countdown-warn','countdown-crit');
-          if (dh.ms <= 48*60*60*1000) countdown.classList.add('countdown-crit');
-          else if (dh.ms <= 7*24*60*60*1000) countdown.classList.add('countdown-warn');
-          else countdown.classList.add('countdown-ok');
-        };
-        update();
-        clearInterval(countdown._timer);
-        countdown._timer = setInterval(update, 60 * 1000);
-      }
-      return;
-    }
-
-    if (pkgStatus === 'قيد الدفع') {
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      text.textContent = `باقتك الحالية: ${pn} — الحالة: قيد الدفع`;
-      card.style.display = 'block';
-      return;
-    }
-
-    if (pkgStatus === 'منتهية') {
-      const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-      let eTxt = '';
-      if (endDate && !isNaN(endDate.getTime())) {
-        eTxt = endDate.toISOString().split('T')[0];
-      }
-      text.textContent = `باقتك الحالية: ${pn} — الحالة: منتهية${eTxt ? ` — انتهت في ${eTxt}` : ''}`;
-      card.style.display = 'block';
-      return;
-    }
-
-    // حالات أخرى
-    const pn = packageName || (pkgId ? `ID ${pkgId}` : 'غير معروفة');
-    text.textContent = `باقتك الحالية: ${pn} — الحالة: ${pkgStatus}`;
-    card.style.display = 'block';
+    // Hide and disable inline package info completely
+    if (countdown) { clearInterval(countdown._timer); countdown._timer = null; countdown.textContent = ''; countdown.className = 'package-countdown'; countdown.style.display = 'none'; }
+    if (text) { text.textContent = ''; }
+    if (card) { card.style.display = 'none'; }
+    return;
   } catch (e) {
     console.warn('updateInlinePackageInfoCard error', e);
   }
