@@ -11,7 +11,7 @@ const THEME_KEY = 'ban_theme';
 
 // متغيرات التحديث التلقائي
 let autoRefreshInterval = null;
-const AUTO_REFRESH_INTERVAL = 30000; // 30 ثانية
+const AUTO_REFRESH_INTERVAL = 60000; // 30 ثانية
 
 /* ========== Theme ========== */
 function applyTheme(theme) {
